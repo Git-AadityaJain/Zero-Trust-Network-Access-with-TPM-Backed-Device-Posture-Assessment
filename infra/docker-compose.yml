@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  backend:
+    image: python:3.10
+    container_name: ztna-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+
+  frontend:
+    image: node:18
+    container_name: ztna-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+
+  postgres:
+    image: postgres:14
+    container_name: ztna-db
+    environment:
+      POSTGRES_DB: ztna
+      POSTGRES_USER: ztnauser
+      POSTGRES_PASSWORD: supersecret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
