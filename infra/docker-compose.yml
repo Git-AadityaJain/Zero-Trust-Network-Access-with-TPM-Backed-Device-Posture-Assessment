@@ -1,12 +1,15 @@
-version: '3.8'
 services:
   backend:
     build: ../backend
     container_name: ztna-backend
+    depends_on:
+      - postgres
     ports:
       - "8000:8000"
     volumes:
       - ../backend:/app
+    env_file:
+      - ../backend/.env
 
   frontend:
     build: ../frontend
@@ -27,6 +30,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+
 
 volumes:
   pgdata:
