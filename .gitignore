@@ -1,15 +1,55 @@
+@"
 # Python
 __pycache__/
+*.py[cod]
+*`$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
 *.pyc
 .env
 
-# Node
-node_modules/
-dist/
+# DPA specific
+TPMSigner.exe
+*.pdb
+*.dll
 
-# Docker
-*.log
+# Build artifacts
+TPMSigner/bin/
+TPMSigner/obj/
+*.user
 
-# General
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets and config
+*.dat
+enrollment.json
+config.yaml
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Git
+*.orig
+"@ | Out-File -FilePath .gitignore -Encoding UTF8 -Force
+
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
