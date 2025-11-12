@@ -45,3 +45,11 @@ Thumbs.db
 # Git
 *.orig
 "@ | Out-File -FilePath .gitignore -Encoding UTF8 -Force
+
+# .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
