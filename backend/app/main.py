@@ -4,9 +4,10 @@ from app.db import Base, engine
 from app.routers import user
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-
+from app.models.user import User  # Ensure model is imported for migrations
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan - create tables on startup"""
     Base.metadata.create_all(bind=engine)
     yield
 
@@ -18,7 +19,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Secure CORS: allow only local frontend during dev, restrict in prod!
+# Secure CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.cors_origin],
@@ -27,9 +28,12 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Register modular routers
-app.include_router(user.router)
+# Register all routers
+app.include_router(user.protected_router)
+app.include_router(user.user_router)
+app.include_router(user.info_router)  # ← ADDED
 
 @app.get("/health", tags=["info"])
 def health():
+    """Quick health check"""
     return {"status": "ok"}
