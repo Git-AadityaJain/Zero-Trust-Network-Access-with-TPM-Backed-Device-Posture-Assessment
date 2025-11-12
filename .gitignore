@@ -1,0 +1,40 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# DPA specific
+TPMSigner.exe
+*.pdb
+*.dll
+
+# Build artifacts
+TPMSigner/bin/
+TPMSigner/obj/
+*.user
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets and config
+*.dat
+enrollment.json
+config.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

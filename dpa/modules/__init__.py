@@ -1,0 +1,3 @@
+"""
+Posture collection modules
+"""
