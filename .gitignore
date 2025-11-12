@@ -1,12 +1,15 @@
-﻿# Python
+@"
+# Python
 __pycache__/
 *.py[cod]
-*.class
+*`$py.class
 *.so
 .Python
 venv/
 env/
 ENV/
+*.pyc
+.env
 
 # DPA specific
 TPMSigner.exe
@@ -38,3 +41,7 @@ config.yaml
 # OS
 .DS_Store
 Thumbs.db
+
+# Git
+*.orig
+"@ | Out-File -FilePath .gitignore -Encoding UTF8 -Force

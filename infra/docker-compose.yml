@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: ../backend
+    container_name: ztna-backend
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+    env_file:
+      - ../backend/.env
+
+  frontend:
+    build: ../frontend
+    container_name: ztna-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+
+  postgres:
+    image: postgres:14
+    container_name: ztna-db
+    environment:
+      POSTGRES_DB: ztna
+      POSTGRES_USER: ztnauser
+      POSTGRES_PASSWORD: supersecret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+
+volumes:
+  pgdata:
