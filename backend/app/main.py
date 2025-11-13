@@ -1,39 +1,69 @@
-from fastapi import FastAPI
+# main.py
+
 from contextlib import asynccontextmanager
-from app.db import Base, engine
-from app.routers import user
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.db import Base, engine
 from app.config import settings
-from app.models.user import User  # Ensure model is imported for migrations
+
+# Import all models so they are registered with SQLAlchemy Base
+from app.models import User, Device, PostureHistory, EnrollmentCode, Policy, AuditLog, AccessLog
+
+# Import routers
+from app.routers import user, device, enrollment, posture, policy, audit, access
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan - create tables on startup"""
-    Base.metadata.create_all(bind=engine)
+    """Application lifespan - create tables on startup using async engine"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
+    await engine.dispose()
 
 app = FastAPI(
-    title=settings.app_name,
-    version="0.1",
+    title="ZTNA Platform Backend",
+    version="0.1.0",
+    description="Zero Trust Network Access Platform API",
     docs_url="/docs",
-    redoc_url=None,
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
-# Secure CORS configuration
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.cors_origin],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Register all routers
-app.include_router(user.protected_router)
-app.include_router(user.user_router)
-app.include_router(user.info_router)  # ← ADDED
+# Include all routers
+app.include_router(user.router, prefix="/api")
+app.include_router(device.router, prefix="/api")
+app.include_router(enrollment.router, prefix="/api")
+app.include_router(posture.router, prefix="/api")
+app.include_router(policy.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
+app.include_router(access.router, prefix="/api")
 
-@app.get("/health", tags=["info"])
-def health():
-    """Quick health check"""
-    return {"status": "ok"}
+@app.get("/health", tags=["health"])
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "ok",
+        "service": "ZTNA Backend",
+        "version": "0.1.0"
+    }
+
+@app.get("/", tags=["root"])
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "ZTNA Platform API",
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "health": "/health",
+        "version": "0.1.0"
+    }

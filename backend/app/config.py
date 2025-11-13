@@ -1,14 +1,41 @@
+from typing import List
+from pydantic import Field, AnyHttpUrl
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 class Settings(BaseSettings):
-    app_name: str = "ZTNA Backend API"
-    db_user: str = Field(..., validation_alias="POSTGRES_USER")
-    db_password: str = Field(..., validation_alias="POSTGRES_PASSWORD")
-    db_host: str = Field(..., validation_alias="POSTGRES_HOST")
-    db_port: str = Field(..., validation_alias="POSTGRES_PORT")
-    db_name: str = Field(..., validation_alias="POSTGRES_DB")
-    secret_key: str = Field(..., validation_alias="SECRET_KEY")
-    cors_origin: str = Field(..., validation_alias="CORS_ORIGIN")
+    POSTGRES_USER: str = Field(..., validation_alias="POSTGRES_USER")
+    POSTGRES_PASSWORD: str = Field(..., validation_alias="POSTGRES_PASSWORD")
+    POSTGRES_HOST: str = Field(..., validation_alias="POSTGRES_HOST")
+    POSTGRES_PORT: int = Field(..., validation_alias="POSTGRES_PORT")
+    POSTGRES_DB: str = Field(..., validation_alias="POSTGRES_DB")
+    CORS_ORIGINS: List[AnyHttpUrl] = Field(default_factory=list, validation_alias="CORS_ORIGIN")
+
+    OIDC_ISSUER: AnyHttpUrl = Field(..., validation_alias="OIDC_ISSUER")
+    OIDC_CLIENT_ID: str = Field(..., validation_alias="OIDC_CLIENT_ID")
+    OIDC_CLIENT_SECRET: str | None = Field(default=None, validation_alias="OIDC_CLIENT_SECRET")
+    OIDC_JWKS_URI: AnyHttpUrl = Field(..., validation_alias="OIDC_JWKS_URI")
+
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+
+    LOG_LEVEL: str = "INFO"
+
+    @property
+    def DATABASE_URL(self) -> str:
+        return (
+            f"postgresql://{self.POSTGRES_USER}:"
+            f"{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:"
+            f"{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
+    model_config = {
+        "case_sensitive": True,
+        "arbitrary_types_allowed": True,
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+    }
+
+    def model_post_init(self, __context: dict) -> None:
+        if isinstance(self.CORS_ORIGINS, str):
+            self.CORS_ORIGINS = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
 settings = Settings()
