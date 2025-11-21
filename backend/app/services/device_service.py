@@ -1,123 +1,261 @@
-# services/device_service.py
+# app/services/device_service.py
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from app.models.device import Device
-from app.schemas.device import DeviceCreate, DeviceUpdate
+from app.models.user import User
+from app.schemas.device import DeviceEnrollmentRequest, DeviceUpdate
 from datetime import datetime, timezone
+import uuid
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DeviceService:
+    """Service for device management operations"""
+    
     @staticmethod
-    async def create_device(db: AsyncSession, device_data: DeviceCreate) -> Device:
-        """Create a new device"""
-        device = Device(**device_data.model_dump())
-        device.is_enrolled = True
-        device.enrolled_at = datetime.now(timezone.utc)
+    async def enroll_device(
+        db: AsyncSession,
+        enrollment_data: DeviceEnrollmentRequest,
+        enrollment_code_id: int
+    ) -> Device:
+        """
+        Enroll a new device (called by DPA agent without authentication)
+        Creates device in 'pending' status awaiting admin approval
+        """
+        # Generate unique device ID (UUID)
+        device_unique_id = str(uuid.uuid4())
+        
+        # Create device with pending status
+        device = Device(
+            device_unique_id=device_unique_id,
+            device_name=enrollment_data.device_name,
+            fingerprint_hash=enrollment_data.fingerprint_hash,
+            tpm_public_key=enrollment_data.tpm_public_key,
+            os_type=enrollment_data.os_type,
+            os_version=enrollment_data.os_version,
+            device_model=enrollment_data.device_model,
+            manufacturer=enrollment_data.manufacturer,
+            initial_posture=enrollment_data.initial_posture,
+            enrollment_code_id=enrollment_code_id,
+            status="pending",  # Awaiting admin approval
+            is_enrolled=False,  # Not fully enrolled until approved
+            is_compliant=False,
+            is_active=True,
+            user_id=None  # Will be set on approval
+        )
+        
         db.add(device)
         await db.commit()
         await db.refresh(device)
+        
+        logger.info(f"Device enrolled with pending status: {device_unique_id}")
         return device
-
+    
     @staticmethod
     async def get_device_by_id(db: AsyncSession, device_id: int) -> Optional[Device]:
         """Get device by ID"""
-        result = await db.execute(select(Device).where(Device.id == device_id))
+        result = await db.execute(
+            select(Device)
+            .options(selectinload(Device.user))
+            .where(Device.id == device_id)
+        )
         return result.scalar_one_or_none()
-
+    
     @staticmethod
     async def get_device_by_unique_id(db: AsyncSession, device_unique_id: str) -> Optional[Device]:
-        """Get device by unique ID (TPM fingerprint)"""
-        result = await db.execute(select(Device).where(Device.device_unique_id == device_unique_id))
+        """Get device by unique ID (UUID)"""
+        result = await db.execute(
+            select(Device)
+            .options(selectinload(Device.user))
+            .where(Device.device_unique_id == device_unique_id)
+        )
         return result.scalar_one_or_none()
-
+    
     @staticmethod
-    async def get_devices_by_user(
-        db: AsyncSession, 
-        user_id: int,
-        active_only: bool = False
+    async def get_device_by_fingerprint(db: AsyncSession, fingerprint_hash: str) -> Optional[Device]:
+        """Get device by hardware fingerprint"""
+        result = await db.execute(
+            select(Device).where(Device.fingerprint_hash == fingerprint_hash)
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_devices_by_status(
+        db: AsyncSession,
+        status: str,
+        limit: int = 100,
+        offset: int = 0
     ) -> List[Device]:
-        """Get all devices for a user"""
-        query = select(Device).where(Device.user_id == user_id)
-        if active_only:
-            query = query.where(Device.is_active == True)
-        result = await db.execute(query)
+        """Get devices filtered by status"""
+        result = await db.execute(
+            select(Device)
+            .options(selectinload(Device.user))
+            .where(Device.status == status)
+            .order_by(Device.enrolled_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         return list(result.scalars().all())
-
+    
+    @staticmethod
+    async def get_pending_devices(db: AsyncSession) -> List[Device]:
+        """Get all devices awaiting approval"""
+        return await DeviceService.get_devices_by_status(db, status="pending")
+    
     @staticmethod
     async def get_all_devices(
         db: AsyncSession,
-        skip: int = 0,
         limit: int = 100,
-        compliant_only: bool = False
+        offset: int = 0,
+        status_filter: Optional[str] = None
     ) -> List[Device]:
-        """Get all devices with pagination"""
-        query = select(Device)
-        if compliant_only:
-            query = query.where(Device.is_compliant == True)
-        query = query.offset(skip).limit(limit)
+        """Get all devices with optional status filter"""
+        query = select(Device).options(selectinload(Device.user))
+        
+        if status_filter:
+            query = query.where(Device.status == status_filter)
+        
+        query = query.order_by(Device.enrolled_at.desc()).limit(limit).offset(offset)
+        
         result = await db.execute(query)
         return list(result.scalars().all())
-
+    
     @staticmethod
-    async def update_device(db: AsyncSession, device_id: int, device_data: DeviceUpdate) -> Optional[Device]:
+    async def get_devices_by_user(db: AsyncSession, user_id: int) -> List[Device]:
+        """Get all devices for a specific user"""
+        result = await db.execute(
+            select(Device)
+            .where(Device.user_id == user_id)
+            .order_by(Device.enrolled_at.desc())
+        )
+        return list(result.scalars().all())
+    
+    @staticmethod
+    async def approve_device(
+        db: AsyncSession,
+        device: Device,
+        user_id: int
+    ) -> Device:
+        """
+        Approve device enrollment and link to user
+        Called after admin approves and user is created
+        """
+        device.status = "active"
+        device.is_enrolled = True
+        device.user_id = user_id
+        
+        await db.commit()
+        await db.refresh(device)
+        
+        logger.info(f"Device {device.device_unique_id} approved and linked to user {user_id}")
+        return device
+    
+    @staticmethod
+    async def reject_device(
+        db: AsyncSession,
+        device: Device,
+        rejection_reason: Optional[str] = None
+    ) -> Device:
+        """Reject device enrollment"""
+        device.status = "rejected"
+        device.is_enrolled = False
+        device.is_active = False
+        
+        # Store rejection reason in posture_data if provided
+        if rejection_reason:
+            device.posture_data = device.posture_data or {}
+            device.posture_data["rejection_reason"] = rejection_reason
+        
+        await db.commit()
+        await db.refresh(device)
+        
+        logger.info(f"Device {device.device_unique_id} rejected")
+        return device
+    
+    @staticmethod
+    async def assign_device_to_user(
+        db: AsyncSession,
+        device: Device,
+        user_id: int
+    ) -> Device:
+        """Assign device to existing user"""
+        device.user_id = user_id
+        device.status = "active"
+        device.is_enrolled = True
+        
+        await db.commit()
+        await db.refresh(device)
+        
+        logger.info(f"Device {device.device_unique_id} assigned to user {user_id}")
+        return device
+    
+    @staticmethod
+    async def update_device(
+        db: AsyncSession,
+        device: Device,
+        update_data: DeviceUpdate
+    ) -> Device:
         """Update device information"""
-        device = await DeviceService.get_device_by_id(db, device_id)
-        if not device:
-            return None
+        update_dict = update_data.model_dump(exclude_unset=True)
         
-        update_data = device_data.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(device, field, value)
+        for key, value in update_dict.items():
+            setattr(device, key, value)
         
-        device.last_seen_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(device)
         return device
-
+    
     @staticmethod
-    async def update_compliance_status(
+    async def update_device_posture(
         db: AsyncSession,
-        device_id: int,
-        is_compliant: bool,
-        posture_data: Optional[Dict[str, Any]] = None
-    ) -> Optional[Device]:
-        """Update device compliance status"""
-        device = await DeviceService.get_device_by_id(db, device_id)
-        if not device:
-            return None
-        
-        device.is_compliant = is_compliant
+        device: Device,
+        posture_data: Dict[str, Any]
+    ) -> Device:
+        """Update device posture data"""
+        device.posture_data = posture_data
         device.last_posture_check = datetime.now(timezone.utc)
         device.last_seen_at = datetime.now(timezone.utc)
         
-        if posture_data:
-            device.posture_data = posture_data
+        await db.commit()
+        await db.refresh(device)
+        return device
+    
+    @staticmethod
+    async def update_compliance_status(
+        db: AsyncSession,
+        device: Device,
+        is_compliant: bool
+    ) -> Device:
+        """Update device compliance status"""
+        device.is_compliant = is_compliant
         
         await db.commit()
         await db.refresh(device)
         return device
-
+    
     @staticmethod
-    async def deactivate_device(db: AsyncSession, device_id: int) -> Optional[Device]:
-        """Deactivate a device"""
-        device = await DeviceService.get_device_by_id(db, device_id)
-        if not device:
-            return None
-        
+    async def deactivate_device(db: AsyncSession, device: Device) -> Device:
+        """Deactivate device"""
         device.is_active = False
-        device.last_seen_at = datetime.now(timezone.utc)
+        device.status = "inactive"
+        
         await db.commit()
         await db.refresh(device)
-        return device
-
-    @staticmethod
-    async def delete_device(db: AsyncSession, device_id: int) -> bool:
-        """Delete a device (hard delete)"""
-        device = await DeviceService.get_device_by_id(db, device_id)
-        if not device:
-            return False
         
+        logger.info(f"Device {device.device_unique_id} deactivated")
+        return device
+    
+    @staticmethod
+    async def delete_device(db: AsyncSession, device: Device) -> bool:
+        """Permanently delete device"""
+        device_id = device.device_unique_id
         await db.delete(device)
         await db.commit()
+        
+        logger.info(f"Device {device_id} deleted")
         return True

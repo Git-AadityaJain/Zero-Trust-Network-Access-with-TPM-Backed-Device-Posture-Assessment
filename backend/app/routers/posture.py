@@ -1,89 +1,138 @@
-# routers/posture.py
+# app/routers/posture.py
 
-from typing import List
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app.db import get_db
-from app.schemas.posture import PostureSubmission, PostureHistoryResponse, PostureHistoryCreate
-from app.services.posture_service import PostureService
 from app.services.device_service import DeviceService
-from app.services.audit_service import AuditService
+from app.services.posture_service import PostureService
+from app.services.signature_service import SignatureService
 from app.dependencies.auth import get_current_active_user
 from app.models.user import User
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/posture", tags=["posture"])
 
-@router.post("/submit", response_model=PostureHistoryResponse, status_code=status.HTTP_201_CREATED)
-async def submit_posture_data(
-    posture_data: PostureSubmission,
-    current_user: User = Depends(get_current_active_user),
+
+# ==================== SCHEMAS ====================
+
+class PostureSubmission(BaseModel):
+    """DPA agent posture submission (public endpoint)"""
+    device_id: str = Field(..., description="Device unique ID (UUID)")
+    posture_data: Dict[str, Any] = Field(..., description="Complete posture data from DPA")
+    signature: str = Field(..., description="TPM/HMAC signature of posture_data")
+
+
+class PostureSubmissionResponse(BaseModel):
+    """Response for posture submission"""
+    status: str
+    is_compliant: bool
+    message: str
+
+
+# ==================== PUBLIC ENDPOINT (DPA Agent) ====================
+
+@router.post("/submit", response_model=PostureSubmissionResponse)
+async def submit_posture(
+    submission: PostureSubmission,
     db: AsyncSession = Depends(get_db)
 ):
-    """Submit device posture data for compliance check"""
-    
-    # Get device
-    device = await DeviceService.get_device_by_unique_id(db, posture_data.device_unique_id)
-    
-    if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Device not found"
+    """
+    **PUBLIC ENDPOINT**
+    Submit device posture data (called by DPA agent)
+    No authentication required - validates device_id and signature instead
+    """
+    try:
+        # Get device by unique ID
+        device = await DeviceService.get_device_by_unique_id(db, submission.device_id)
+        
+        if not device:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Device not found"
+            )
+        
+        # Check if device is approved and active
+        if device.status != "active" or not device.is_enrolled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Device is not approved or inactive"
+            )
+        
+        # Verify signature
+        is_valid_signature = await SignatureService.verify_posture_signature(
+            device=device,
+            posture_data=submission.posture_data,
+            signature=submission.signature
         )
-    
-    # Ensure user owns the device
-    if device.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
+        
+        if not is_valid_signature:
+            logger.warning(f"Invalid signature for device {submission.device_id}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid signature"
+            )
+        
+        # Evaluate posture compliance
+        is_compliant = await PostureService.evaluate_compliance(
+            posture_data=submission.posture_data
         )
-    
-    # Evaluate compliance
-    is_compliant, score, violations = await PostureService.evaluate_compliance(
-        posture_data.posture_data
-    )
-    
-    # Create posture history record
-    posture_create = PostureHistoryCreate(
-        device_id=device.id,
-        is_compliant=is_compliant,
-        compliance_score=score,
-        posture_data=posture_data.posture_data,
-        violations=violations,
-        signature=posture_data.signature,
-        signature_valid=True  # TODO: Verify signature with TPM public key
-    )
-    
-    posture_record = await PostureService.create_posture_record(db, posture_create)
-    
-    # Update device compliance status
-    await DeviceService.update_compliance_status(
-        db, device.id, is_compliant, posture_data.posture_data
-    )
-    
-    # Log posture submission
-    await AuditService.log_event(
-        db=db,
-        user_id=current_user.id,
-        event_type="posture_check",
-        action="submit",
-        resource_type="device",
-        resource_id=str(device.id),
-        status="success" if is_compliant else "warning",
-        description=f"Compliance: {is_compliant}, Score: {score}"
-    )
-    
-    return posture_record
+        
+        # Update device posture
+        await DeviceService.update_device_posture(
+            db=db,
+            device=device,
+            posture_data=submission.posture_data
+        )
+        
+        # Update compliance status
+        await DeviceService.update_compliance_status(
+            db=db,
+            device=device,
+            is_compliant=is_compliant
+        )
+        
+        # Store posture history
+        await PostureService.create_posture_record(
+            db=db,
+            device_id=device.id,
+            posture_data=submission.posture_data,
+            is_compliant=is_compliant
+        )
+        
+        logger.info(f"Posture submitted for device {submission.device_id}, compliant: {is_compliant}")
+        
+        return PostureSubmissionResponse(
+            status="success",
+            is_compliant=is_compliant,
+            message="Posture data received and evaluated"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing posture submission: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process posture submission"
+        )
 
-@router.get("/device/{device_id}/history", response_model=List[PostureHistoryResponse])
-async def get_posture_history(
+
+# ==================== ADMIN ENDPOINTS (Authenticated) ====================
+
+@router.get("/device/{device_id}/history")
+async def get_device_posture_history(
     device_id: int,
-    skip: int = 0,
     limit: int = 50,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get posture history for a device"""
+    """Get posture history for a device (admin only)"""
     device = await DeviceService.get_device_by_id(db, device_id)
     
     if not device:
@@ -92,23 +141,22 @@ async def get_posture_history(
             detail="Device not found"
         )
     
-    # Ensure user owns the device
-    if device.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+    history = await PostureService.get_posture_history(
+        db=db,
+        device_id=device_id,
+        limit=limit
+    )
     
-    history = await PostureService.get_posture_history(db, device_id, skip, limit)
     return history
 
-@router.get("/device/{device_id}/latest", response_model=PostureHistoryResponse)
-async def get_latest_posture(
+
+@router.get("/device/{device_id}/latest")
+async def get_device_latest_posture(
     device_id: int,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get the latest posture check for a device"""
+    """Get latest posture data for a device"""
     device = await DeviceService.get_device_by_id(db, device_id)
     
     if not device:
@@ -117,19 +165,11 @@ async def get_latest_posture(
             detail="Device not found"
         )
     
-    # Ensure user owns the device
-    if device.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
-    
-    latest_posture = await PostureService.get_latest_posture(db, device_id)
-    
-    if not latest_posture:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No posture data available"
-        )
-    
-    return latest_posture
+    return {
+        "device_id": device.id,
+        "device_unique_id": device.device_unique_id,
+        "posture_data": device.posture_data,
+        "is_compliant": device.is_compliant,
+        "last_posture_check": device.last_posture_check,
+        "last_seen_at": device.last_seen_at
+    }

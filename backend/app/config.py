@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
 
     LOG_LEVEL: str = "INFO"
-
+    DEFAULT_USER_ROLE: str = Field(default="dpa-device", validation_alias="DEFAULT_USER_ROLE")
     @property
     def DATABASE_URL(self) -> str:
         return (
