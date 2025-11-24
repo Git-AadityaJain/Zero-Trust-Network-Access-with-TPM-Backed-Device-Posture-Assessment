@@ -23,9 +23,11 @@ def check_firewall() -> dict:
         
         if result.returncode == 0:
             output = result.stdout.lower()
-            firewall_enabled = "state                                 on" in output
+            # Check if any profile shows "state" followed by "on" (more flexible matching)
+            # The output format is: "State                                 ON" or "State                                 OFF"
+            firewall_enabled = "state" in output and ("on" in output.split("state")[-1][:50])
             
-            # Determine profile
+            # Determine profile (check which profile is active)
             profile = "Unknown"
             if "domain profile" in output:
                 profile = "Domain"
@@ -33,6 +35,13 @@ def check_firewall() -> dict:
                 profile = "Private"
             elif "public profile" in output:
                 profile = "Public"
+            
+            # More robust check: if we see "state" and "on" anywhere in the output
+            if not firewall_enabled:
+                # Try alternative: check if all profiles show ON
+                lines = result.stdout.split('\n')
+                on_count = sum(1 for line in lines if 'state' in line.lower() and 'on' in line.lower())
+                firewall_enabled = on_count > 0
             
             return {
                 "firewall_enabled": firewall_enabled,

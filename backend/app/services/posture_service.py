@@ -53,39 +53,68 @@ class PostureService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def evaluate_compliance(posture_data: Dict[str, Any]) -> tuple[bool, int, List[str]]:
+    def evaluate_compliance(posture_data: Dict[str, Any]) -> tuple[bool, int, List[str]]:
         """
-        Evaluate device compliance based on posture data
+        Evaluate device compliance based on posture data.
         Returns: (is_compliant, compliance_score, violations)
+        
+        Note: The posture_data structure from DPA is nested:
+        - antivirus: {"installed": bool, "running": bool, "product_name": str}
+        - firewall: {"firewall_enabled": bool, "firewall_profile": str}
+        - disk_encryption: {"encryption_enabled": bool, "encryption_method": str}
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         violations = []
         score = 100
         
-        # Check antivirus status
-        if not posture_data.get("antivirus_enabled"):
+        # Extract nested data structures
+        antivirus = posture_data.get("antivirus", {})
+        firewall = posture_data.get("firewall", {})
+        disk_encryption = posture_data.get("disk_encryption", {})
+        screen_lock = posture_data.get("screen_lock", {})
+        
+        # Debug logging
+        logger.info(f"Evaluating compliance - Antivirus: {antivirus}, Firewall: {firewall}, Disk Encryption: {disk_encryption}, Screen Lock: {screen_lock}")
+        
+        # Check antivirus status (must be installed AND running)
+        antivirus_enabled = antivirus.get("installed", False) and antivirus.get("running", False)
+        logger.info(f"Antivirus check - installed: {antivirus.get('installed')}, running: {antivirus.get('running')}, enabled: {antivirus_enabled}")
+        if not antivirus_enabled:
             violations.append("Antivirus not enabled")
             score -= 30
         
         # Check firewall status
-        if not posture_data.get("firewall_enabled"):
+        firewall_enabled = firewall.get("firewall_enabled", False)
+        logger.info(f"Firewall check - firewall_enabled: {firewall_enabled}")
+        if not firewall_enabled:
             violations.append("Firewall not enabled")
             score -= 25
         
         # Check disk encryption
-        if not posture_data.get("disk_encrypted"):
+        disk_encrypted = disk_encryption.get("encryption_enabled", False)
+        logger.info(f"Disk encryption check - encryption_enabled: {disk_encrypted}")
+        if not disk_encrypted:
             violations.append("Disk encryption not enabled")
             score -= 25
         
-        # Check OS updates
-        if posture_data.get("pending_updates", 0) > 10:
-            violations.append(f"{posture_data['pending_updates']} pending updates")
+        # Check OS updates (if present in os_info)
+        os_info = posture_data.get("os_info", {})
+        pending_updates = os_info.get("pending_updates", 0)
+        if pending_updates > 10:
+            violations.append(f"{pending_updates} pending updates")
             score -= 10
         
-        # Check screen lock
-        if not posture_data.get("screen_lock_enabled"):
+        # Check screen lock (from screen_lock dict)
+        screen_lock_enabled = screen_lock.get("screen_lock_enabled", False)
+        logger.info(f"Screen lock check - screen_lock_enabled: {screen_lock_enabled}")
+        if not screen_lock_enabled:
             violations.append("Screen lock not enabled")
             score -= 10
         
-        is_compliant = score >= 70  # Compliance threshold
+        is_compliant = score >= 70  # Compliance threshold (70% or higher is compliant)
+        
+        logger.info(f"Final compliance evaluation - Compliant: {is_compliant}, Score: {score}%, Violations: {len(violations)}")
         
         return is_compliant, max(0, score), violations

@@ -19,7 +19,7 @@ export const getAuditLogs = (filters = {}) => {
     params.end_date = filters.endDate;
   }
   
-  return apiClient.get('/api/audit/devices', { params });
+  return apiClient.get('/audit/devices', { params });
 };
 
 export default {

@@ -41,7 +41,7 @@ async def get_current_user_info(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get current authenticated user information"""
-    return current_user
+    return UserResponse.model_validate(current_user)
 
 
 @router.get("/me/devices", response_model=UserWithDevices)
@@ -57,7 +57,12 @@ async def get_current_user_with_devices(
         .where(User.id == current_user.id)
     )
     user = result.scalar_one()
-    return user
+    # Convert devices to DeviceResponse schemas
+    devices = [DeviceResponse.model_validate(device) for device in user.devices]
+    return UserWithDevices(
+        **UserResponse.model_validate(user).model_dump(),
+        devices=devices
+    )
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -85,7 +90,7 @@ async def update_current_user(
     except KeycloakError as e:
         logger.warning(f"Failed to sync user update to Keycloak: {e}")
     
-    return updated_user
+    return UserResponse.model_validate(updated_user)
 
 
 # ==================== ADMIN USER MANAGEMENT ENDPOINTS ====================
@@ -180,7 +185,7 @@ async def create_user(
         )
         
         logger.info(f"User created successfully: {user.username} (ID: {user.id})")
-        return user
+        return UserResponse.model_validate(user)
         
     except KeycloakError as e:
         logger.error(f"Keycloak error during user creation: {e}")
@@ -196,7 +201,7 @@ async def create_user(
         )
 
 
-@router.get("", response_model=List[UserResponse])
+@router.get("", response_model=List[UserDetailedResponse])
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -204,9 +209,35 @@ async def list_users(
     current_user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db)
 ):
-    """List all users with pagination (admin only)"""
+    """List all users with pagination and Keycloak roles (admin only)"""
     users = await UserService.get_all_users(db, skip, limit, active_only)
-    return users
+    result = []
+    
+    for user in users:
+        try:
+            # Get Keycloak roles for each user
+            keycloak_roles = await keycloak_service.get_user_realm_roles(user.keycloak_id)
+            keycloak_user = await keycloak_service.get_user_by_id(user.keycloak_id)
+            
+            base_response = UserResponse.model_validate(user)
+            user_response = UserDetailedResponse(
+                **base_response.model_dump(),
+                keycloak_roles=[role["name"] for role in keycloak_roles],
+                keycloak_enabled=keycloak_user.get("enabled", True) if keycloak_user else True
+            )
+            result.append(user_response)
+        except Exception as e:
+            logger.warning(f"Failed to fetch Keycloak info for user {user.id}: {e}")
+            # Fallback to basic response without roles
+            base_response = UserResponse.model_validate(user)
+            user_response = UserDetailedResponse(
+                **base_response.model_dump(),
+                keycloak_roles=[],
+                keycloak_enabled=True
+            )
+            result.append(user_response)
+    
+    return result
 
 
 @router.get("/{user_id}", response_model=UserDetailedResponse)
@@ -232,8 +263,10 @@ async def get_user(
         keycloak_user = await keycloak_service.get_user_by_id(user.keycloak_id)
         keycloak_roles = await keycloak_service.get_user_realm_roles(user.keycloak_id)
         
+        # Convert user to base response first
+        base_response = UserResponse.model_validate(user)
         user_response = UserDetailedResponse(
-            **user.__dict__,
+            **base_response.model_dump(),
             keycloak_roles=[role["name"] for role in keycloak_roles],
             keycloak_enabled=keycloak_user.get("enabled", True)
         )
@@ -242,7 +275,8 @@ async def get_user(
     except KeycloakError as e:
         logger.warning(f"Failed to fetch Keycloak data for user {user_id}: {e}")
         # Return user without Keycloak data
-        return UserDetailedResponse(**user.__dict__)
+        base_response = UserResponse.model_validate(user)
+        return UserDetailedResponse(**base_response.model_dump())
 
 
 @router.get("/{user_id}/devices", response_model=List[DeviceResponse])
@@ -261,7 +295,7 @@ async def get_user_devices(
         )
     
     devices = await DeviceService.get_devices_by_user(db, user_id)
-    return devices
+    return [DeviceResponse.model_validate(device) for device in devices]
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
@@ -322,7 +356,7 @@ async def update_user(
         )
         
         logger.info(f"User {user_id} updated by admin {current_user.username}")
-        return updated_user
+        return UserResponse.model_validate(updated_user)
         
     except KeycloakUserNotFoundError:
         raise HTTPException(

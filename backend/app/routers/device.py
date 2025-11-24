@@ -82,7 +82,7 @@ async def enroll_device(
     )
     
     # Mark enrollment code as used
-    await EnrollmentService.use_code(db, enrollment_code)
+    await EnrollmentService.use_code(db, enrollment_code.code)
     
     logger.info(f"Device enrolled with pending status: {device.device_unique_id}")
     
@@ -128,6 +128,40 @@ async def check_device_status(
     )
 
 
+@router.delete("/unenroll/{device_unique_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unenroll_device_public(
+    device_unique_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    **PUBLIC ENDPOINT**
+    Unenroll device by device_unique_id (called by DPA agent)
+    Allows device to remove itself from backend without authentication
+    Only works if device is in pending or rejected status (not active)
+    """
+    device = await DeviceService.get_device_by_unique_id(db, device_unique_id)
+    
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found"
+        )
+    
+    # Only allow unenrollment if device is pending or rejected
+    # Active devices should be deleted by admin to prevent accidental removal
+    if device.status == "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot unenroll active device. Please contact administrator to delete device."
+        )
+    
+    # Delete device
+    await DeviceService.delete_device(db, device)
+    
+    logger.info(f"Device {device_unique_id} unenrolled (self-service)")
+    return None
+
+
 # ==================== ADMIN ENDPOINTS (Authenticated) ====================
 
 @router.get("/pending", response_model=List[DeviceResponse])
@@ -139,7 +173,7 @@ async def get_pending_devices(
     Get all devices awaiting approval (admin only)
     """
     devices = await DeviceService.get_pending_devices(db)
-    return devices
+    return [DeviceResponse.model_validate(device) for device in devices]
 
 
 @router.get("", response_model=List[DeviceResponse])
@@ -159,7 +193,7 @@ async def get_all_devices(
         offset=offset,
         status_filter=status_filter
     )
-    return devices
+    return [DeviceResponse.model_validate(device) for device in devices]
 
 
 @router.get("/{device_id}", response_model=DeviceResponse)
@@ -179,7 +213,7 @@ async def get_device(
             detail="Device not found"
         )
     
-    return device
+    return DeviceResponse.model_validate(device)
 
 
 @router.patch("/{device_id}/approve", response_model=DeviceResponse)
@@ -270,7 +304,7 @@ async def approve_device(
         )
         
         logger.info(f"Device {device_id} approved and user {user.id} created")
-        return device
+        return DeviceResponse.model_validate(device)
         
     except KeycloakError as e:
         logger.error(f"Keycloak error during device approval: {e}")
@@ -330,7 +364,7 @@ async def reject_device(
     )
     
     logger.info(f"Device {device_id} rejected by admin {current_user.username}")
-    return device
+    return DeviceResponse.model_validate(device)
 
 
 @router.patch("/{device_id}/assign", response_model=DeviceResponse)
@@ -394,7 +428,7 @@ async def assign_device_to_user(
     )
     
     logger.info(f"Device {device_id} assigned to user {user.id}")
-    return device
+    return DeviceResponse.model_validate(device)
 
 
 @router.patch("/{device_id}", response_model=DeviceResponse)
@@ -427,7 +461,7 @@ async def update_device(
         details=update_data.model_dump(exclude_unset=True)
     )
     
-    return device
+    return DeviceResponse.model_validate(device)
 
 
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)

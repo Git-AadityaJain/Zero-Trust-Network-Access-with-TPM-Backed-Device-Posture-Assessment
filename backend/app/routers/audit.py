@@ -42,7 +42,7 @@ async def get_audit_logs(
         start_date=start_date,
         end_date=end_date
     )
-    return logs
+    return [AuditLogResponse.model_validate(log) for log in logs]
 
 @router.get("/logs/me", response_model=List[AuditLogResponse])
 async def get_my_audit_logs(
@@ -64,7 +64,7 @@ async def get_my_audit_logs(
         start_date=start_date,
         end_date=end_date
     )
-    return logs
+    return [AuditLogResponse.model_validate(log) for log in logs]
 
 @router.get("/events/types", response_model=List[str])
 async def get_event_types(

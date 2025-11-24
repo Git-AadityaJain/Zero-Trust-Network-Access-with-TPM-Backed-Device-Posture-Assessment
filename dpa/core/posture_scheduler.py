@@ -29,11 +29,12 @@ class PostureScheduler:
         while not self._stop_event.is_set():
             try:
                 posture_report = collect_posture_report()
+                # Device ID will be extracted from enrollment info in submit_posture
                 success = self.submitter.submit_posture(posture_report)
                 if success:
-                    logger.info("Scheduled posture report submitted")
+                    logger.info("Scheduled posture report submitted successfully")
                 else:
-                    logger.warning("Scheduled posture report submission failed")
+                    logger.warning("Scheduled posture report submission failed - will retry on next interval")
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
             time.sleep(self.interval)

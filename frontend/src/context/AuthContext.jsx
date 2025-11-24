@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect } from 'react';
+import oidcService from '../services/oidcService';
 
 export const AuthContext = createContext();
 
@@ -8,44 +9,110 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const checkAuth = () => {
-      const token = localStorage.getItem('auth_token');
-      const storedUser = localStorage.getItem('user_info');
-
-      if (token && storedUser) {
-        setUser(JSON.parse(storedUser));
-        setIsAuthenticated(true);
-      } else {
+    const checkAuth = async () => {
+      try {
+        if (oidcService.isAuthenticated()) {
+          const storedUser = localStorage.getItem('user_info');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            setUser(userData);
+            setIsAuthenticated(true);
+          } else {
+            // Try to get user info from token
+            const token = oidcService.getAccessToken();
+            if (token) {
+              const userInfo = await oidcService.getUserInfo(token);
+              setUser(userInfo);
+              setIsAuthenticated(true);
+              localStorage.setItem('user_info', JSON.stringify(userInfo));
+            }
+          }
+        } else {
+          // Try to refresh token
+          try {
+            await oidcService.refreshToken();
+            const storedUser = localStorage.getItem('user_info');
+            if (storedUser) {
+              setUser(JSON.parse(storedUser));
+              setIsAuthenticated(true);
+            }
+          } catch (e) {
+            setIsAuthenticated(false);
+          }
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
         setIsAuthenticated(false);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     checkAuth();
+
+    // Set up token refresh interval
+    const interval = setInterval(async () => {
+      if (oidcService.isAuthenticated()) {
+        try {
+          await oidcService.refreshToken();
+        } catch (e) {
+          console.error('Token refresh failed:', e);
+        }
+      }
+    }, 5 * 60 * 1000); // Refresh every 5 minutes
+
+    return () => clearInterval(interval);
   }, []);
 
-  const login = (username, password) => {
-    const mockUser = {
-      id: 'user-123',
-      username,
-      email: `${username}@company.com`,
-      roles: ['admin', 'user'],
-    };
-    localStorage.setItem('auth_token', 'mock-token-' + Date.now());
-    localStorage.setItem('user_info', JSON.stringify(mockUser));
-    setUser(mockUser);
-    setIsAuthenticated(true);
+  const login = async () => {
+    try {
+      await oidcService.login();
+    } catch (error) {
+      console.error('Login failed:', error);
+      throw error;
+    }
   };
 
-  const logout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_info');
+  const handleCallback = async (code) => {
+    try {
+      const result = await oidcService.handleCallback(code);
+      if (result && result.userInfo && result.access_token) {
+        setUser(result.userInfo);
+        setIsAuthenticated(true);
+        return result; // Return full result, not just userInfo
+      } else {
+        throw new Error('Invalid result from authentication service');
+      }
+    } catch (error) {
+      console.error('Callback handling failed:', error);
+      setIsAuthenticated(false);
+      setUser(null);
+      throw error;
+    }
+  };
+
+  const logout = async () => {
+    // Clear local state first
     setUser(null);
     setIsAuthenticated(false);
+    // Then call Keycloak logout (which will redirect)
+    await oidcService.logout();
   };
 
   const hasRole = (role) => {
-    return user?.roles?.includes(role) || false;
+    const roles = oidcService.getRoles();
+    const hasAccess = roles.includes(role) || false;
+    
+    // Debug logging (remove in production)
+    if (!hasAccess) {
+      console.log(`Access denied: User roles [${roles.join(', ')}] do not include required role: ${role}`);
+    }
+    
+    return hasAccess;
+  };
+
+  const getAccessToken = () => {
+    return oidcService.getAccessToken();
   };
 
   return (
@@ -57,6 +124,8 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         hasRole,
+        handleCallback,
+        getAccessToken,
       }}
     >
       {children}

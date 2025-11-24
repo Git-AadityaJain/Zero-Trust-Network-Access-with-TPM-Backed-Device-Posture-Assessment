@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = Field(..., validation_alias="POSTGRES_HOST")
     POSTGRES_PORT: int = Field(..., validation_alias="POSTGRES_PORT")
     POSTGRES_DB: str = Field(..., validation_alias="POSTGRES_DB")
-    CORS_ORIGINS: List[AnyHttpUrl] = Field(default_factory=list, validation_alias="CORS_ORIGIN")
+    CORS_ORIGIN: str = Field(default="", validation_alias="CORS_ORIGIN")
 
     OIDC_ISSUER: AnyHttpUrl = Field(..., validation_alias="OIDC_ISSUER")
     OIDC_CLIENT_ID: str = Field(..., validation_alias="OIDC_CLIENT_ID")
@@ -34,8 +34,19 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
     }
 
-    def model_post_init(self, __context: dict) -> None:
-        if isinstance(self.CORS_ORIGINS, str):
-            self.CORS_ORIGINS = [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+    @property
+    def CORS_ORIGINS(self) -> List[str]:
+        """Parse CORS_ORIGIN string into a list, removing duplicates."""
+        if not self.CORS_ORIGIN or not self.CORS_ORIGIN.strip():
+            return []
+        # Split, strip, filter empty, and remove duplicates while preserving order
+        origins = []
+        seen = set()
+        for origin in self.CORS_ORIGIN.split(","):
+            origin = origin.strip()
+            if origin and origin not in seen:
+                origins.append(origin)
+                seen.add(origin)
+        return origins
 
 settings = Settings()

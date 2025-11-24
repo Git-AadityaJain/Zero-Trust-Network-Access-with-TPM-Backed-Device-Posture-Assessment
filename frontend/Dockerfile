@@ -1,11 +1,12 @@
 #frontend/Dockerfile
 
-FROM node:18
+FROM node:20
 
 WORKDIR /app
 
 COPY package.json ./
-COPY package-lock.json ./
+# Copy package-lock.json if it exists, otherwise npm install will create it
+COPY package-lock.json* ./
 RUN npm install
 
 COPY . .

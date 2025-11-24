@@ -16,10 +16,12 @@ class EnrollmentCode(Base):
     
     # Status
     is_active = Column(Boolean, default=True, nullable=False)
+    is_expired = Column(Boolean, default=False, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
     
     # Metadata
     description = Column(String(500), nullable=True)

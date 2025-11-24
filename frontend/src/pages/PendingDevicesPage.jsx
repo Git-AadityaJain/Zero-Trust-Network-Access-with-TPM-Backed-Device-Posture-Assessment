@@ -1,11 +1,60 @@
-import React, { useState } from 'react';
-import { usePendingDevices } from '../hooks/useDevices';
+import React, { useState, useEffect } from 'react';
+import apiClient from '../api/apiClient';
+import ApprovalModal from '../components/Modals/ApprovalModal';
+import RejectModal from '../components/Modals/RejectModal';
 
 export default function PendingDevicesPage() {
-  const { devices, loading, error, refetch } = usePendingDevices(true, 3000);
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedDevice, setSelectedDevice] = useState(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+
+  useEffect(() => {
+    fetchPendingDevices();
+    const interval = setInterval(fetchPendingDevices, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchPendingDevices = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.get('/devices/pending');
+      setDevices(response.data);
+      setError(null);
+    } catch (err) {
+      setError('Failed to fetch pending devices');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = (device) => {
+    setSelectedDevice(device);
+    setShowApprovalModal(true);
+  };
+
+  const handleReject = (device) => {
+    setSelectedDevice(device);
+    setShowRejectModal(true);
+  };
+
+  const handleApprovalSuccess = () => {
+    setShowApprovalModal(false);
+    setSelectedDevice(null);
+    fetchPendingDevices();
+  };
+
+  const handleRejectionSuccess = () => {
+    setShowRejectModal(false);
+    setSelectedDevice(null);
+    fetchPendingDevices();
+  };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-4xl font-bold text-gray-900">Pending Device Enrollments</h1>
         <p className="text-gray-600 mt-2">
@@ -54,52 +103,60 @@ export default function PendingDevicesPage() {
                     <td className="py-4 px-6">
                       <div>
                         <p className="font-medium text-gray-900">{device.device_name || 'Unknown'}</p>
-                        <p className="text-gray-500 text-xs font-mono">{device.id.substring(0, 12)}...</p>
+                        <p className="text-gray-500 text-xs font-mono">
+                          {device.device_unique_id ? device.device_unique_id.substring(0, 12) + '...' : `ID: ${device.id}`}
+                        </p>
                       </div>
                     </td>
 
                     <td className="py-4 px-6">
                       <span className="px-3 py-1 bg-blue-100 text-blue-900 text-xs rounded-full font-medium">
-                        {device.os_info?.system || 'N/A'} {device.os_info?.release}
+                        {device.os_type || 'N/A'} {device.os_version || ''}
                       </span>
                     </td>
 
                     <td className="py-4 px-6">
                       <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                        device.firewall?.firewall_enabled
+                        device.initial_posture?.firewall_enabled
                           ? 'bg-green-100 text-green-900'
                           : 'bg-red-100 text-red-900'
                       }`}>
-                        {device.firewall?.firewall_enabled ? '✓ Enabled' : '✗ Disabled'}
+                        {device.initial_posture?.firewall_enabled ? '✓ Enabled' : '✗ Disabled'}
                       </span>
                     </td>
 
                     <td className="py-4 px-6">
                       <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                        device.disk_encryption?.encryption_enabled
+                        device.initial_posture?.disk_encrypted
                           ? 'bg-green-100 text-green-900'
                           : 'bg-red-100 text-red-900'
                       }`}>
-                        {device.disk_encryption?.encryption_enabled ? '✓ Enabled' : '✗ Disabled'}
+                        {device.initial_posture?.disk_encrypted ? '✓ Enabled' : '✗ Disabled'}
                       </span>
                     </td>
 
                     <td className="py-4 px-6">
                       <span className={`px-3 py-1 text-xs rounded-full font-medium ${
-                        device.antivirus?.running
+                        device.initial_posture?.antivirus_enabled
                           ? 'bg-green-100 text-green-900'
                           : 'bg-red-100 text-red-900'
                       }`}>
-                        {device.antivirus?.running ? '✓ Running' : '✗ Not Running'}
+                        {device.initial_posture?.antivirus_enabled ? '✓ Running' : '✗ Not Running'}
                       </span>
                     </td>
 
                     <td className="py-4 px-6 text-center">
                       <div className="flex justify-center gap-2">
-                        <button className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded transition font-medium text-sm">
+                        <button
+                          onClick={() => handleApprove(device)}
+                          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded transition font-medium text-sm"
+                        >
                           Approve
                         </button>
-                        <button className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition font-medium text-sm">
+                        <button
+                          onClick={() => handleReject(device)}
+                          className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded transition font-medium text-sm"
+                        >
                           Reject
                         </button>
                       </div>
@@ -110,6 +167,22 @@ export default function PendingDevicesPage() {
             </table>
           </div>
         </div>
+      )}
+
+      {showApprovalModal && selectedDevice && (
+        <ApprovalModal
+          device={selectedDevice}
+          onClose={() => setShowApprovalModal(false)}
+          onSuccess={handleApprovalSuccess}
+        />
+      )}
+
+      {showRejectModal && selectedDevice && (
+        <RejectModal
+          device={selectedDevice}
+          onClose={() => setShowRejectModal(false)}
+          onSuccess={handleRejectionSuccess}
+        />
       )}
     </div>
   );

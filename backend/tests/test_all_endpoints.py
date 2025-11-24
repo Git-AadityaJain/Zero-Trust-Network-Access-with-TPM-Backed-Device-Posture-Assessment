@@ -16,11 +16,11 @@ BASE_URL = "http://localhost:8000/api"
 KEYCLOAK_URL = "http://localhost:8080"
 
 # Configuration
-REALM = "ZTNA-Platform"
-CLIENT_ID = "ztna-backend"
-CLIENT_SECRET = settings.OIDC_CLIENT_SECRET  # Replace with actual secret
-TEST_USERNAME = "admin-user"
-TEST_PASSWORD = "Test123!"
+REALM = "master"  # Updated to match current Keycloak configuration
+CLIENT_ID = "admin-frontend"  # Use frontend client for testing (public client)
+CLIENT_SECRET = None  # Public client, no secret needed
+TEST_USERNAME = "admin"
+TEST_PASSWORD = "adminsecure123"  # Default Keycloak admin password
 
 # Store test data
 test_data = {
@@ -58,10 +58,12 @@ async def get_token():
     data = {
         "grant_type": "password",
         "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
         "username": TEST_USERNAME,
         "password": TEST_PASSWORD,
     }
+    # Only add client_secret if it's not None (for public clients)
+    if CLIENT_SECRET:
+        data["client_secret"] = CLIENT_SECRET
     
     async with httpx.AsyncClient() as client:
         response = await client.post(token_url, data=data)

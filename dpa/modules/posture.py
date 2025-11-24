@@ -13,6 +13,7 @@ def collect_posture_report() -> dict:
     from .firewall import check_firewall
     from .disk_encryption import check_disk_encryption
     from .antivirus import check_antivirus
+    from .screen_lock import check_screen_lock
     from .fingerprint import get_device_fingerprint
     
     # Get device_id from enrollment if available
@@ -25,6 +26,7 @@ def collect_posture_report() -> dict:
         "firewall": check_firewall(),
         "disk_encryption": check_disk_encryption(),
         "antivirus": check_antivirus(),
+        "screen_lock": check_screen_lock(),
         "fingerprint": get_device_fingerprint()
     }
     

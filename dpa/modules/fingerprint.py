@@ -32,7 +32,10 @@ def get_device_fingerprint() -> dict:
         return {
             "fingerprint_enabled": True,
             "users_enrolled": 1,  # Placeholder
-            "fingerprint_hash": fingerprint_hash[:16]  # Truncated for display
+            "fingerprint_hash": fingerprint_hash,  # Full 64-char SHA256 hash
+            "motherboard_serial": mb_serial,
+            "bios_serial": bios_serial,
+            "system_uuid": system_uuid
         }
     except Exception as e:
         logger.error(f"Error generating device fingerprint: {e}")

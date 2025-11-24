@@ -9,11 +9,11 @@ BASE_URL = "http://localhost:8000/api"
 KEYCLOAK_URL = "http://localhost:8080"
 
 # Test credentials
-TEST_USERNAME = "admin-user"
-TEST_PASSWORD = "Test123!"
-REALM = "ZTNA-Platform"
-CLIENT_ID = "ztna-backend"
-CLIENT_SECRET = settings.OIDC_CLIENT_SECRET
+TEST_USERNAME = "admin"
+TEST_PASSWORD = "adminsecure123"
+REALM = "master"  # Updated to match current Keycloak configuration
+CLIENT_ID = "admin-frontend"  # Use frontend client for testing
+CLIENT_SECRET = None  # Public client, no secret needed
 
 async def get_keycloak_token():
     """Get JWT token from Keycloak"""

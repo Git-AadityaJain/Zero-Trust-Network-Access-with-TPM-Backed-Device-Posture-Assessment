@@ -33,7 +33,7 @@ async def create_enrollment_code(
         status="success"
     )
     
-    return code
+    return EnrollmentCodeResponse.model_validate(code)
 
 @router.get("/codes", response_model=List[EnrollmentCodeResponse])
 async def list_enrollment_codes(
@@ -45,7 +45,7 @@ async def list_enrollment_codes(
 ):
     """List all enrollment codes (admin only in production)"""
     codes = await EnrollmentService.get_all_codes(db, skip, limit, active_only)
-    return codes
+    return [EnrollmentCodeResponse.model_validate(code) for code in codes]
 
 @router.post("/codes/{code_id}/deactivate", response_model=EnrollmentCodeResponse)
 async def deactivate_enrollment_code(
@@ -73,4 +73,4 @@ async def deactivate_enrollment_code(
         status="success"
     )
     
-    return code
+    return EnrollmentCodeResponse.model_validate(code)

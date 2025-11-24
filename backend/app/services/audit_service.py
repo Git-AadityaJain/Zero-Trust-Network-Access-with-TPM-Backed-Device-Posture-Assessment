@@ -45,6 +45,43 @@ class AuditService:
         return await AuditService.create_audit_log(db, audit_data)
 
     @staticmethod
+    async def log_action(
+        db: AsyncSession,
+        user_id: Optional[int] = None,
+        action: str = "",
+        resource_type: Optional[str] = None,
+        resource_id: Optional[int] = None,
+        details: Optional[dict] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> AuditLog:
+        """Convenience method to log an action with details"""
+        # Determine event_type from action if not provided
+        event_type = "general"
+        if action.startswith("user_"):
+            event_type = "user_management"
+        elif action.startswith("device_"):
+            event_type = "device_management"
+        elif action.startswith("policy_"):
+            event_type = "policy_management"
+        elif action.startswith("enrollment_"):
+            event_type = "enrollment_code"
+        
+        audit_data = AuditLogCreate(
+            user_id=user_id,
+            event_type=event_type,
+            action=action,
+            resource_type=resource_type,
+            resource_id=str(resource_id) if resource_id else None,
+            description=f"{action} on {resource_type or 'resource'}" if resource_type else action,
+            status="success",
+            event_metadata=details,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        return await AuditService.create_audit_log(db, audit_data)
+
+    @staticmethod
     async def get_audit_logs(
         db: AsyncSession,
         skip: int = 0,

@@ -1,18 +1,16 @@
 import React from 'react';
 import { useDevices, usePendingDevices } from '../hooks/useDevices';
-import { useUsers } from '../hooks/useUsers';
 import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { devices: allDevices, loading: devicesLoading } = useDevices();
-  const { devices: pendingDevices } = usePendingDevices(true, 5000);
-  const { users, loading: usersLoading } = useUsers();
+  const { devices: allDevices } = useDevices();
+  const { devices: pendingDevices, loading: devicesLoading } = usePendingDevices(true, 5000);
 
-  const approvedDevices = allDevices.filter((d) => d.status === 'approved').length;
-  const compliantDevices = allDevices.filter((d) => d.compliance_status === 'compliant').length;
-  const nonCompliantDevices = allDevices.filter((d) => d.compliance_status === 'noncompliant').length;
+  const approvedDevices = allDevices.filter((d) => d.status === 'active').length;
+  const compliantDevices = allDevices.filter((d) => d.is_compliant === true).length;
+  const nonCompliantDevices = allDevices.filter((d) => d.is_compliant === false).length;
 
   const stats = [
     {
@@ -118,11 +116,11 @@ export default function Dashboard() {
                 {pendingDevices.slice(0, 5).map((device) => (
                   <tr key={device.id} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 font-mono text-xs text-gray-600">
-                      {device.id.substring(0, 8)}...
+                      {device.device_unique_id?.substring(0, 8) || device.id?.toString().substring(0, 8)}...
                     </td>
                     <td className="py-3 px-4 text-gray-900">{device.device_name || 'Unknown'}</td>
                     <td className="py-3 px-4 text-gray-700">
-                      {device.os_info?.system || 'N/A'}
+                      {device.os_type || 'N/A'} {device.os_version || ''}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <Link

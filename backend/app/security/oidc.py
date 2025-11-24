@@ -71,6 +71,16 @@ def verify_jwt_token(token: str) -> TokenPayload:
     Raises:
         HTTPException: If token is invalid or expired
     """
+    if not token:
+        logger.error("No token provided")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No token provided",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    logger.debug(f"Verifying token (length: {len(token) if token else 0})")
+    
     try:
         # Get JWKS
         jwks = get_jwks()
@@ -97,20 +107,131 @@ def verify_jwt_token(token: str) -> TokenPayload:
                 detail="Unable to find matching key"
             )
         
-        # Verify and decode
-        payload = jwt.decode(
-            token,
-            rsa_key,
-            algorithms=["RS256"],
-            audience=settings.OIDC_CLIENT_ID,
-            issuer=str(settings.OIDC_ISSUER),
-            options={
-                "verify_signature": True,
-                "verify_aud": True,
-                "verify_iss": True,
-                "verify_exp": True
-            }
-        )
+        # Accept tokens from both backend client and frontend client
+        # Frontend uses 'admin-frontend', backend uses OIDC_CLIENT_ID
+        # Also accept 'master-realm' as fallback (realm name sometimes used as audience)
+        valid_audiences = [
+            settings.OIDC_CLIENT_ID,
+            "admin-frontend",  # Frontend client ID
+            "account",  # Keycloak account service (sometimes included)
+            "master-realm"  # Realm name (fallback for tokens issued before audience mapper)
+        ]
+        
+        # Decode token with signature verification only
+        # We'll handle all other validations manually to be more flexible
+        try:
+            payload = jwt.decode(
+                token,
+                rsa_key,
+                algorithms=["RS256"],
+                options={
+                    "verify_signature": True,
+                    "verify_aud": False,  # We'll verify manually
+                    "verify_iss": False,  # We'll verify manually to handle URL variations
+                    "verify_exp": True,   # Verify expiration
+                    "verify_nbf": False,  # Don't verify not-before
+                    "verify_iat": False  # Don't verify issued-at
+                }
+            )
+            
+            # Extract token claims
+            token_issuer = payload.get("iss", "").rstrip('/')
+            token_audience = payload.get("aud")
+            token_exp = payload.get("exp")
+            
+            logger.info(f"Token decoded. Issuer: {token_issuer}, Audience: {token_audience}, Exp: {token_exp}")
+            
+            # Check expiration manually (already verified by jose, but log it)
+            if token_exp and token_exp < int(__import__('time').time()):
+                logger.error(f"Token expired. Exp: {token_exp}, Now: {int(__import__('time').time())}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has expired",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            
+            # Manual issuer validation - accept both internal and external URLs
+            # Keycloak tokens can have different hostnames (keycloak:8080 vs localhost:8080)
+            # but the realm name should match
+            expected_issuer = str(settings.OIDC_ISSUER).rstrip('/')
+            actual_issuer = token_issuer
+            
+            # Extract realm name from both issuers
+            def extract_realm(issuer_url):
+                """Extract realm name from issuer URL"""
+                if '/realms/' in issuer_url:
+                    return issuer_url.split('/realms/')[-1].split('?')[0].split('#')[0]
+                return None
+            
+            expected_realm = extract_realm(expected_issuer)
+            actual_realm = extract_realm(actual_issuer)
+            
+            # Validate issuer: check if realm names match (most important)
+            # Also check if URLs are similar (same protocol, port, and path)
+            issuer_valid = False
+            
+            if expected_realm and actual_realm:
+                # Primary check: realm names must match
+                if expected_realm == actual_realm:
+                    issuer_valid = True
+                    logger.info(f"Issuer validation passed: realm '{expected_realm}' matches")
+                else:
+                    logger.error(f"Realm mismatch: expected '{expected_realm}', got '{actual_realm}'")
+            
+            # Secondary check: if realm extraction failed, try URL normalization
+            if not issuer_valid:
+                # Normalize URLs by removing hostname differences
+                def normalize_issuer_path(issuer_url):
+                    """Extract the path part of issuer URL"""
+                    if '/realms/' in issuer_url:
+                        return '/realms/' + issuer_url.split('/realms/')[-1]
+                    return issuer_url
+            
+                expected_path = normalize_issuer_path(expected_issuer)
+                actual_path = normalize_issuer_path(actual_issuer)
+                
+                if expected_path == actual_path:
+                    issuer_valid = True
+                    logger.info(f"Issuer validation passed: path '{expected_path}' matches")
+            
+            if not issuer_valid:
+                logger.error(f"Issuer validation failed. Token issuer: {actual_issuer}, Expected: {expected_issuer}")
+                logger.error(f"Expected realm: {expected_realm}, Actual realm: {actual_realm}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Invalid token issuer. Expected realm: {expected_realm}, Got: {actual_realm}",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            
+            # Manual audience validation
+            payload_aud = payload.get("aud")
+            if isinstance(payload_aud, str):
+                payload_aud_list = [payload_aud]
+            elif isinstance(payload_aud, list):
+                payload_aud_list = payload_aud
+            else:
+                payload_aud_list = []
+            
+            # Check if any audience matches
+            if payload_aud_list and not any(aud in valid_audiences for aud in payload_aud_list):
+                logger.error(f"Audience validation failed. Token audience: {payload_aud_list}, Expected one of: {valid_audiences}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Invalid token audience. Expected one of: {valid_audiences}",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            
+        except JWTError as e:
+            # If other JWT validation fails, log detailed error
+            error_msg = str(e)
+            logger.error(f"JWT validation failed: {error_msg}")
+            logger.error(f"Token issuer from payload: {payload.get('iss') if 'payload' in locals() else 'N/A'}")
+            logger.error(f"Expected issuer: {settings.OIDC_ISSUER}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Token validation failed: {error_msg}",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
         
         # Extract roles from realm_access
         roles = payload.get("realm_access", {}).get("roles", [])

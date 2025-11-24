@@ -1,32 +1,20 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const { login } = useAuth();
-  const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleLogin = async () => {
     setError('');
     setLoading(true);
 
     try {
-      if (!username || !password) {
-        setError('Please enter both username and password');
-        return;
-      }
-
-      login(username, password);
-      navigate('/dashboard');
+      await login();
     } catch (err) {
       setError('Login failed. Please try again.');
-    } finally {
       setLoading(false);
     }
   };
@@ -51,51 +39,23 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
-                disabled={loading}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-            >
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
-          </form>
+          <button
+            onClick={handleLogin}
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Redirecting to Keycloak...' : 'Login with Keycloak'}
+          </button>
 
           <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-900">
-              <strong>Demo Credentials:</strong>
+              <strong>OIDC Authentication:</strong>
               <br />
-              Username: <code className="bg-blue-100 px-2 py-1 rounded">admin</code>
+              You will be redirected to Keycloak for secure authentication.
               <br />
-              Password: <code className="bg-blue-100 px-2 py-1 rounded">any value</code>
+              <span className="text-xs text-blue-700 mt-2 block">
+                Using PKCE flow for enhanced security
+              </span>
             </p>
           </div>
         </div>

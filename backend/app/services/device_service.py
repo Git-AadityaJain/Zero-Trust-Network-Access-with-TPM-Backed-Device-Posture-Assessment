@@ -10,12 +10,55 @@ from app.schemas.device import DeviceEnrollmentRequest, DeviceUpdate
 from datetime import datetime, timezone
 import uuid
 import logging
+import base64
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
 
 
 class DeviceService:
     """Service for device management operations"""
+    
+    @staticmethod
+    def _convert_public_key_to_pem(public_key_data: str) -> str:
+        """
+        Convert public key from base64 SPKI format to PEM format
+        TPMSigner returns base64-encoded SubjectPublicKeyInfo, but backend needs PEM
+        """
+        try:
+            # Try to decode as base64 first
+            try:
+                key_bytes = base64.b64decode(public_key_data)
+            except Exception:
+                # If it's already PEM format, return as-is
+                if public_key_data.strip().startswith("-----BEGIN"):
+                    return public_key_data.strip()
+                raise ValueError("Invalid public key format")
+            
+            # Load as DER (SPKI format)
+            try:
+                public_key = serialization.load_der_public_key(
+                    key_bytes,
+                    backend=default_backend()
+                )
+            except Exception:
+                # Try PEM format
+                public_key = serialization.load_pem_public_key(
+                    public_key_data.encode(),
+                    backend=default_backend()
+                )
+                return public_key_data.strip()
+            
+            # Convert to PEM format
+            pem_key = public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            return pem_key.decode('utf-8').strip()
+        except Exception as e:
+            logger.warning(f"Failed to convert public key to PEM: {e}. Storing as-is.")
+            return public_key_data.strip()
     
     @staticmethod
     async def enroll_device(
@@ -30,12 +73,17 @@ class DeviceService:
         # Generate unique device ID (UUID)
         device_unique_id = str(uuid.uuid4())
         
+        # Convert public key to PEM format if needed
+        tpm_public_key_pem = DeviceService._convert_public_key_to_pem(
+            enrollment_data.tpm_public_key
+        )
+        
         # Create device with pending status
         device = Device(
             device_unique_id=device_unique_id,
             device_name=enrollment_data.device_name,
             fingerprint_hash=enrollment_data.fingerprint_hash,
-            tpm_public_key=enrollment_data.tpm_public_key,
+            tpm_public_key=tpm_public_key_pem,
             os_type=enrollment_data.os_type,
             os_version=enrollment_data.os_version,
             device_model=enrollment_data.device_model,

@@ -1,6 +1,7 @@
 # app/routers/posture.py
 
 from typing import Dict, Any
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
@@ -79,7 +80,7 @@ async def submit_posture(
             )
         
         # Evaluate posture compliance
-        is_compliant = await PostureService.evaluate_compliance(
+        is_compliant, compliance_score, violations = PostureService.evaluate_compliance(
             posture_data=submission.posture_data
         )
         
@@ -97,13 +98,74 @@ async def submit_posture(
             is_compliant=is_compliant
         )
         
+        # Handle role revocation/assignment based on compliance (if device has user)
+        if device.user_id:
+            from app.services.user_service import UserService
+            from app.services.policy_service import PolicyService
+            from app.services.keycloak_service import keycloak_service
+            
+            user = await UserService.get_user_by_id(db, device.user_id)
+            if user and user.keycloak_id:
+                # Get current user roles from Keycloak
+                current_roles = await keycloak_service.get_user_realm_roles(user.keycloak_id)
+                current_role_names = [role.get("name") for role in current_roles]
+                has_dpa_device_role = "dpa-device" in current_role_names
+                
+                # Revoke dpa-device role if non-compliant
+                if not is_compliant and has_dpa_device_role:
+                    logger.warning(
+                        f"Device {device.id} is non-compliant. Revoking dpa-device role from user {user.id}"
+                    )
+                    revoked = await keycloak_service.remove_realm_roles_from_user(
+                        user_id=user.keycloak_id,
+                        role_names=["dpa-device"]
+                    )
+                    if revoked:
+                        logger.info(f"Successfully revoked dpa-device role from user {user.id}")
+                    else:
+                        logger.error(f"Failed to revoke dpa-device role from user {user.id}")
+                
+                # Restore dpa-device role if compliant and was previously revoked
+                elif is_compliant and not has_dpa_device_role:
+                    logger.info(
+                        f"Device {device.id} is now compliant. Restoring dpa-device role to user {user.id}"
+                    )
+                    assigned = await keycloak_service.assign_realm_roles_to_user(
+                        user_id=user.keycloak_id,
+                        role_names=["dpa-device"]
+                    )
+                    if assigned:
+                        logger.info(f"Successfully restored dpa-device role to user {user.id}")
+                    else:
+                        logger.error(f"Failed to restore dpa-device role to user {user.id}")
+                
+                # Re-evaluate policies with updated posture
+                allowed, results, denial_reason = await PolicyService.evaluate_policies(
+                    db=db,
+                    user=user,
+                    device=device,
+                    posture_data=submission.posture_data,
+                    context={"time": datetime.now(timezone.utc).isoformat()}
+                )
+                
+                # Log policy evaluation results
+                if not allowed:
+                    logger.warning(
+                        f"Policy evaluation failed for device {device.id} after posture update: {denial_reason}"
+                    )
+        
         # Store posture history
-        await PostureService.create_posture_record(
-            db=db,
+        from app.schemas.posture import PostureHistoryCreate
+        posture_record = PostureHistoryCreate(
             device_id=device.id,
             posture_data=submission.posture_data,
-            is_compliant=is_compliant
+            is_compliant=is_compliant,
+            compliance_score=compliance_score,
+            violations=violations,
+            signature=submission.signature,
+            signature_valid=True
         )
+        await PostureService.create_posture_record(db, posture_record)
         
         logger.info(f"Posture submitted for device {submission.device_id}, compliant: {is_compliant}")
         
@@ -133,6 +195,8 @@ async def get_device_posture_history(
     db: AsyncSession = Depends(get_db)
 ):
     """Get posture history for a device (admin only)"""
+    from app.schemas.posture import PostureHistoryResponse
+    
     device = await DeviceService.get_device_by_id(db, device_id)
     
     if not device:
@@ -147,7 +211,7 @@ async def get_device_posture_history(
         limit=limit
     )
     
-    return history
+    return [PostureHistoryResponse.model_validate(record) for record in history]
 
 
 @router.get("/device/{device_id}/latest")

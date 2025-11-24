@@ -33,13 +33,27 @@ async def get_current_user(
     """
     token = credentials.credentials
     
+    if not token:
+        logger.error("No token provided in Authorization header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No token provided",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    logger.debug(f"Received token for verification (length: {len(token)})")
+    
     # Verify token with Keycloak using oidc.py
     try:
         token_payload: TokenPayload = verify_jwt_token(token)
-    except HTTPException:
+        logger.debug(f"Token verified successfully for user: {token_payload.preferred_username}")
+    except HTTPException as e:
+        logger.warning(f"Token verification failed with HTTPException: {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"Token verification failed: {e}")
+        logger.error(f"Token verification failed with exception: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -50,8 +64,20 @@ async def get_current_user(
     keycloak_id = token_payload.sub
     
     try:
+        # First, try to get user by Keycloak ID
         user = await UserService.get_user_by_keycloak_id(db, keycloak_id)
         
+        # If not found, try to get by email (user might exist with different keycloak_id)
+        if user is None and token_payload.email:
+            user = await UserService.get_user_by_email(db, token_payload.email)
+            # If found by email but keycloak_id doesn't match or is None, update it
+            if user and (user.keycloak_id != keycloak_id or user.keycloak_id is None):
+                logger.info(f"Updating user {user.id} with new Keycloak ID: {keycloak_id} (was: {user.keycloak_id})")
+                user.keycloak_id = keycloak_id
+                await db.commit()
+                await db.refresh(user)
+        
+        # If still not found, create new user
         if user is None:
             # Auto-create user from Keycloak token
             logger.info(f"Auto-creating user from Keycloak: {token_payload.preferred_username}")
@@ -66,7 +92,30 @@ async def get_current_user(
                 is_active=True
             )
             
-            user = await UserService.create_user(db, user_create)
+            try:
+                user = await UserService.create_user(db, user_create)
+            except Exception as create_error:
+                # If creation fails due to duplicate (race condition), try to fetch again
+                error_str = str(create_error).lower()
+                if "duplicate" in error_str or "unique" in error_str or "already exists" in error_str:
+                    logger.warning(f"User creation failed due to duplicate, retrying fetch: {create_error}")
+                    # Try to get by email
+                    if token_payload.email:
+                        user = await UserService.get_user_by_email(db, token_payload.email)
+                    # If still not found, try by keycloak_id again
+                    if user is None:
+                        user = await UserService.get_user_by_keycloak_id(db, keycloak_id)
+                    
+                    if user is None:
+                        # If still not found, re-raise the original error
+                        logger.error(f"Failed to create or find user after duplicate error: {create_error}")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Failed to retrieve user information"
+                        )
+                else:
+                    # Re-raise if it's a different error
+                    raise
         
         # Check if user is active
         if not user.is_active:
@@ -83,7 +132,7 @@ async def get_current_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting/creating user: {e}")
+        logger.error(f"Error getting/creating user: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user information"

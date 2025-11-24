@@ -13,7 +13,7 @@ from app.models.user import User
 
 router = APIRouter(prefix="/policies", tags=["policies"])
 
-@router.post("/", response_model=PolicyResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PolicyResponse, status_code=status.HTTP_201_CREATED)
 async def create_policy(
     policy_data: PolicyCreate,
     current_user: User = Depends(get_current_active_user),
@@ -43,7 +43,7 @@ async def create_policy(
         description=f"Created policy: {policy.name}"
     )
     
-    return policy
+    return PolicyResponse.model_validate(policy)
 
 @router.get("", response_model=List[PolicyResponse])  # Changed from "/" to ""
 async def list_policies(
@@ -58,7 +58,7 @@ async def list_policies(
     policies = await PolicyService.get_all_policies(
         db, skip, limit, active_only, policy_type
     )
-    return policies
+    return [PolicyResponse.model_validate(policy) for policy in policies]
 
 @router.get("/{policy_id}", response_model=PolicyResponse)
 async def get_policy(
@@ -75,8 +75,9 @@ async def get_policy(
             detail="Policy not found"
         )
     
-    return policy
+    return PolicyResponse.model_validate(policy)
 
+@router.put("/{policy_id}", response_model=PolicyResponse)
 @router.patch("/{policy_id}", response_model=PolicyResponse)
 async def update_policy(
     policy_id: int,
@@ -114,7 +115,7 @@ async def update_policy(
         description=f"Updated policy: {updated_policy.name}"
     )
     
-    return updated_policy
+    return PolicyResponse.model_validate(updated_policy)
 
 @router.delete("/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy(
@@ -182,7 +183,7 @@ async def activate_policy(
         status="success"
     )
     
-    return updated_policy
+    return PolicyResponse.model_validate(updated_policy)
 
 @router.post("/{policy_id}/deactivate", response_model=PolicyResponse)
 async def deactivate_policy(
@@ -213,4 +214,4 @@ async def deactivate_policy(
         status="success"
     )
     
-    return updated_policy
+    return PolicyResponse.model_validate(updated_policy)

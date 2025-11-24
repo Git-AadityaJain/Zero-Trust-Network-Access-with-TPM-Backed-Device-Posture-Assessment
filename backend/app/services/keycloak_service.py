@@ -37,12 +37,12 @@ class KeycloakService:
     
     def __init__(self):
         # Extract realm from OIDC issuer URL
-        # Format: http://localhost:8080/realms/ZTNA-Platform
+        # Format: http://keycloak:8080/realms/master or http://localhost:8080/realms/master
         issuer_parts = str(settings.OIDC_ISSUER).rstrip('/').split('/')
-        self.realm = issuer_parts[-1]  # Extract "ZTNA-Platform"
+        self.realm = issuer_parts[-1]  # Extract realm name (e.g., "master")
         
-        # Build base Keycloak URL (remove /realms/ZTNA-Platform)
-        self.base_url = '/'.join(issuer_parts[:-2])  # http://localhost:8080
+        # Build base Keycloak URL (remove /realms/{realm})
+        self.base_url = '/'.join(issuer_parts[:-2])  # http://keycloak:8080 or http://localhost:8080
         
         self.admin_api_url = f"{self.base_url}/admin/realms/{self.realm}"
         self.token_url = f"{self.base_url}/realms/{self.realm}/protocol/openid-connect/token"
@@ -75,6 +75,7 @@ class KeycloakService:
                         "grant_type": "client_credentials",
                         "client_id": self.client_id,
                         "client_secret": self.client_secret,
+                        "scope": "openid roles",  # Request roles scope to include client roles in token
                     },
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                     timeout=10.0
@@ -558,6 +559,145 @@ class KeycloakService:
             logger.error(f"Error getting roles for user {user_id}: {e}")
             return []
     
+    async def create_realm_role(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        composite: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Create a new realm-level role
+        
+        Args:
+            name: Role name
+            description: Role description
+            composite: Whether this is a composite role
+        
+        Returns:
+            Created role dictionary
+        
+        Raises:
+            KeycloakError: If role creation fails
+        """
+        role_data = {
+            "name": name,
+            "composite": composite,
+            "clientRole": False
+        }
+        
+        if description:
+            role_data["description"] = description
+        
+        try:
+            response = await self._make_request(
+                "POST",
+                "/roles",
+                json_data=role_data
+            )
+            
+            if response.status_code == 201:
+                # Keycloak returns 201 but doesn't return the role, so fetch it
+                return await self.get_role_by_name(name)
+            elif response.status_code == 409:
+                raise KeycloakError(f"Role '{name}' already exists")
+            else:
+                logger.error(f"Failed to create role: {response.status_code} - {response.text}")
+                raise KeycloakError(f"Failed to create role: {response.status_code}")
+                
+        except KeycloakError:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating role {name}: {e}")
+            raise KeycloakError(f"Error creating role: {e}")
+    
+    async def update_realm_role(
+        self,
+        role_name: str,
+        description: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update a realm-level role
+        
+        Args:
+            role_name: Name of the role to update
+            description: New description (optional)
+        
+        Returns:
+            Updated role dictionary
+        
+        Raises:
+            KeycloakError: If role update fails
+        """
+        # Get current role data
+        current_role = await self.get_role_by_name(role_name)
+        if not current_role:
+            raise KeycloakError(f"Role '{role_name}' not found")
+        
+        # Prepare update data
+        update_data = {
+            "name": current_role["name"],
+            "composite": current_role.get("composite", False),
+            "clientRole": current_role.get("clientRole", False)
+        }
+        
+        if description is not None:
+            update_data["description"] = description
+        elif "description" in current_role:
+            update_data["description"] = current_role["description"]
+        
+        try:
+            response = await self._make_request(
+                "PUT",
+                f"/roles/{role_name}",
+                json_data=update_data
+            )
+            
+            if response.status_code == 204:
+                # Return updated role
+                return await self.get_role_by_name(role_name)
+            elif response.status_code == 404:
+                raise KeycloakError(f"Role '{role_name}' not found")
+            else:
+                logger.error(f"Failed to update role: {response.status_code} - {response.text}")
+                raise KeycloakError(f"Failed to update role: {response.status_code}")
+                
+        except KeycloakError:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating role {role_name}: {e}")
+            raise KeycloakError(f"Error updating role: {e}")
+    
+    async def delete_realm_role(self, role_name: str) -> bool:
+        """
+        Delete a realm-level role
+        
+        Args:
+            role_name: Name of the role to delete
+        
+        Returns:
+            True if successful
+        
+        Raises:
+            KeycloakError: If role deletion fails
+        """
+        try:
+            response = await self._make_request("DELETE", f"/roles/{role_name}")
+            
+            if response.status_code == 204:
+                logger.info(f"Successfully deleted role: {role_name}")
+                return True
+            elif response.status_code == 404:
+                raise KeycloakError(f"Role '{role_name}' not found")
+            else:
+                logger.error(f"Failed to delete role: {response.status_code} - {response.text}")
+                raise KeycloakError(f"Failed to delete role: {response.status_code}")
+                
+        except KeycloakError:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting role {role_name}: {e}")
+            raise KeycloakError(f"Error deleting role: {e}")
+    
     # ==================== USER ATTRIBUTES ====================
     
     async def set_user_attribute(
@@ -623,8 +763,11 @@ class KeycloakService:
             True if healthy
         """
         try:
-            token = await self._get_admin_token()
-            return token is not None
+            # Simple connectivity check - try to access well-known endpoint
+            well_known_url = f"{self.base_url}/realms/{self.realm}/.well-known/openid-configuration"
+            async with httpx.AsyncClient() as client:
+                response = await client.get(well_known_url, timeout=5.0)
+                return response.status_code == 200
         except Exception as e:
             logger.error(f"Keycloak health check failed: {e}")
             return False

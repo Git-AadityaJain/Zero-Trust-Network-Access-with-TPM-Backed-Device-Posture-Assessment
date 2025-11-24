@@ -27,6 +27,7 @@ export const useDevices = (status = null, autoRefresh = false, refreshInterval =
       const interval = setInterval(fetchDevices, refreshInterval);
       return () => clearInterval(interval);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, autoRefresh, refreshInterval]);
 
   return { devices, loading, error, refetch: fetchDevices };
