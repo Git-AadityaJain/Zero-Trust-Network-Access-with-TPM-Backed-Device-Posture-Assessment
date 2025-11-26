@@ -1,7 +1,0 @@
-{
-  "agent_id": "default-agent",
-  "tpm_enabled": true,
-  "backend_url": "http://localhost:8000",
-  "reporting_interval": 300,
-  "device_name": "SHUBHAM"
-}
