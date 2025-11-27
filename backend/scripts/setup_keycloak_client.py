@@ -18,12 +18,24 @@ import base64
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
+import os
 
-KEYCLOAK_URL = str(settings.OIDC_ISSUER).split('/realms/')[0]  # http://keycloak:8080
+# Determine Keycloak URL - use localhost when running from host, keycloak hostname when in Docker
+KEYCLOAK_BASE = str(settings.OIDC_ISSUER).split('/realms/')[0]  # http://keycloak:8080 or http://localhost:8080
+
+# If running from host machine (not in Docker), replace 'keycloak' with 'localhost'
+if 'keycloak' in KEYCLOAK_BASE and os.getenv('DOCKER_CONTAINER') != 'true':
+    KEYCLOAK_URL = KEYCLOAK_BASE.replace('keycloak', 'localhost')
+else:
+    KEYCLOAK_URL = KEYCLOAK_BASE
+
+# Allow override via environment variable
+KEYCLOAK_URL = os.getenv('KEYCLOAK_URL', KEYCLOAK_URL)
+
 REALM = "master"
 CLIENT_ID = "ZTNA-Platform-realm"
 ADMIN_USER = "admin"
-ADMIN_PASSWORD = "admin"  # Default Keycloak admin password
+ADMIN_PASSWORD = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "adminsecure123")  # Use correct default password
 
 async def get_admin_token():
     """Get Keycloak admin token"""
@@ -101,6 +113,9 @@ async def setup_client():
     print("=" * 60)
     print("Keycloak Client Setup Script")
     print("=" * 60)
+    print(f"\nUsing Keycloak URL: {KEYCLOAK_URL}")
+    print(f"Realm: {REALM}")
+    print(f"Client ID: {CLIENT_ID}")
     
     # Get admin token
     print("\n1. Getting admin token...")

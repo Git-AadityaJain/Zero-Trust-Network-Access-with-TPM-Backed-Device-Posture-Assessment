@@ -20,8 +20,8 @@
     "clientSessionMaxLifespan":  0,
     "clientOfflineSessionIdleTimeout":  0,
     "clientOfflineSessionMaxLifespan":  0,
-    "accessCodeLifespan":  60,
-    "accessCodeLifespanUserAction":  300,
+    "accessCodeLifespan":  300,
+    "accessCodeLifespanUserAction":  600,
     "accessCodeLifespanLogin":  1800,
     "actionTokenGeneratedByAdminLifespan":  43200,
     "actionTokenGeneratedByUserLifespan":  300,
@@ -855,13 +855,15 @@
                                              "http://localhost:3000/callback",
                                              "http://localhost/callback",
                                              "http://152.58.31.27/callback",
-                                             "https://b64e34aa6da9.ngrok-free.app/callback"
+                                             "https://b64e34aa6da9.ngrok-free.app/callback",
+                                             "https://609b9c24fbd6.ngrok-free.app/callback"
                                          ],
                         "webOrigins":  [
                                            "http://localhost:3000",
                                            "http://localhost",
                                            "http://152.58.31.27",
-                                           "https://b64e34aa6da9.ngrok-free.app"
+                                           "https://b64e34aa6da9.ngrok-free.app",
+                                           "https://609b9c24fbd6.ngrok-free.app"
                                        ],
                         "notBefore":  0,
                         "bearerOnly":  false,
@@ -875,7 +877,7 @@
                         "protocol":  "openid-connect",
                         "attributes":  {
                                            "pkce.code.challenge.method":  "S256",
-                                           "post.logout.redirect.uris":  "http://localhost:3000/login,http://localhost/login,http://152.58.31.27/login,https://b64e34aa6da9.ngrok-free.app/login"
+                                           "post.logout.redirect.uris":  "http://localhost:3000/login,http://localhost/login,http://152.58.31.27/login,https://b64e34aa6da9.ngrok-free.app/login,https://609b9c24fbd6.ngrok-free.app/login"
                                        },
                         "authenticationFlowBindingOverrides":  {
 

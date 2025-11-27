@@ -138,6 +138,9 @@ export default function UsersPage() {
         if (createData.assign_roles && createData.assign_roles.length === 0) {
           delete createData.assign_roles; // Don't send empty array
         }
+        // Set temporary_password to false to avoid redirect loop issues
+        // Users created through the frontend should not be forced to change password
+        createData.temporary_password = false;
         await userService.createUser(createData);
         alert('User created successfully');
       }

@@ -20,9 +20,6 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # Environment
-.env
-.env.local
-.env.*.local
 
 # IDE
 .vscode/

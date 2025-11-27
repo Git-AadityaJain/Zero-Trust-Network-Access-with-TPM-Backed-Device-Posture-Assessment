@@ -46,6 +46,25 @@ class AccessResponse(BaseModel):
     policy_name: Optional[str] = None
     token: Optional[str] = None
 
+
+class PolicyDecisionRequest(BaseModel):
+    """Request for policy decision (after login)"""
+    resource: Optional[str] = Field(default="*", description="Resource being accessed (default: all)")
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context (geo, time, etc.)")
+
+
+class PolicyDecisionResponse(BaseModel):
+    """Response for policy decision"""
+    allowed: bool
+    reason: str
+    has_dpa: bool
+    tpm_key_match: bool
+    is_compliant: bool
+    device_id: Optional[int] = None
+    device_name: Optional[str] = None
+    risk_level: str = Field(default="low", description="Risk level: low, medium, high, critical")
+    requires_step_up: bool = Field(default=False, description="Whether step-up authentication is required")
+
 @router.get("/logs", response_model=List[AccessLogResponse])
 async def get_access_logs(
     skip: int = Query(0, ge=0),
@@ -370,4 +389,176 @@ async def request_access(
         resource=request.resource,
         reason="Access granted by policy evaluation",
         token=token
+    )
+
+
+@router.post("/decision", response_model=PolicyDecisionResponse)
+async def policy_decision(
+    request_data: PolicyDecisionRequest,
+    current_user: User = Depends(get_current_active_user),
+    http_request: Request = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Policy decision endpoint for initial login verification.
+    
+    This endpoint evaluates user + device + context to determine if access should be granted.
+    Called after OIDC login to verify:
+    - User identity (from OIDC token)
+    - Device enrollment and compliance
+    - TPM key verification
+    - Recent posture reports
+    - Risk factors (geo, time, etc.)
+    
+    This prevents compromised credentials from granting access without a verified device.
+    """
+    from datetime import datetime, timezone, timedelta
+    from app.models.posture_history import PostureHistory
+    from sqlalchemy import select, desc
+    
+    # Get user's devices
+    devices = await DeviceService.get_devices_by_user(db, current_user.id)
+    
+    # Risk assessment
+    risk_level = "low"
+    requires_step_up = False
+    
+    # No devices = high risk
+    if not devices:
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="No enrolled devices found. Please enroll a device to access resources.",
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=False,
+            risk_level="high",
+            requires_step_up=True
+        )
+    
+    # Find active enrolled device with recent posture
+    active_device = None
+    for device in devices:
+        if device.is_enrolled and device.status == "active":
+            if device.last_posture_check:
+                time_since_posture = datetime.now(timezone.utc) - device.last_posture_check.replace(tzinfo=timezone.utc)
+                if time_since_posture < timedelta(minutes=15):
+                    active_device = device
+                    break
+    
+    if not active_device:
+        enrolled_devices = [d for d in devices if d.is_enrolled and d.status == "active"]
+        if enrolled_devices:
+            active_device = max(enrolled_devices, key=lambda d: d.last_seen_at or datetime.min.replace(tzinfo=timezone.utc))
+    
+    # No active device = high risk
+    if not active_device:
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="No active enrolled device found. Please ensure your device is enrolled and reporting posture.",
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=False,
+            risk_level="high",
+            requires_step_up=True
+        )
+    
+    # Check TPM key match
+    tpm_key_match = False
+    if active_device.tpm_public_key:
+        result = await db.execute(
+            select(PostureHistory)
+            .where(PostureHistory.device_id == active_device.id)
+            .order_by(desc(PostureHistory.checked_at))
+            .limit(1)
+        )
+        latest_posture = result.scalar_one_or_none()
+        if latest_posture:
+            tpm_key_match = latest_posture.signature_valid
+    
+    # Invalid TPM key = critical risk
+    if not tpm_key_match:
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="TPM key verification failed. Device may have been compromised.",
+            has_dpa=True,
+            tpm_key_match=False,
+            is_compliant=active_device.is_compliant,
+            device_id=active_device.id,
+            device_name=active_device.device_name,
+            risk_level="critical",
+            requires_step_up=True
+        )
+    
+    # Check DPA activity
+    has_dpa = False
+    if active_device.last_posture_check:
+        time_since_posture = datetime.now(timezone.utc) - active_device.last_posture_check.replace(tzinfo=timezone.utc)
+        has_dpa = time_since_posture < timedelta(minutes=15)
+    
+    # Stale posture = medium risk
+    if not has_dpa:
+        risk_level = "medium"
+        requires_step_up = True
+    
+    # Non-compliant device = high risk
+    if not active_device.is_compliant:
+        risk_level = "high"
+        requires_step_up = True
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="Device is not compliant. Please ensure your device meets security requirements.",
+            has_dpa=has_dpa,
+            tpm_key_match=tpm_key_match,
+            is_compliant=False,
+            device_id=active_device.id,
+            device_name=active_device.device_name,
+            risk_level=risk_level,
+            requires_step_up=requires_step_up
+        )
+    
+    # Evaluate policies
+    context = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "resource": request_data.resource,
+        **request_data.context
+    }
+    
+    # Add geo/time context if available
+    if http_request:
+        context["source_ip"] = http_request.client.host if http_request.client else None
+    
+    allowed, results, denial_reason = await PolicyService.evaluate_policies(
+        db=db,
+        user=current_user,
+        device=active_device,
+        posture_data=active_device.posture_data,
+        context=context
+    )
+    
+    # Determine final risk level based on policy evaluation
+    if not allowed:
+        risk_level = "high"
+        requires_step_up = True
+    
+    # Log decision
+    await AccessService.log_access(
+        db=db,
+        device_id=active_device.id,
+        resource_accessed=request_data.resource,
+        access_type="policy_decision",
+        access_granted=allowed,
+        denial_reason=denial_reason if not allowed else None,
+        source_ip=http_request.client.host if http_request and http_request.client else None
+    )
+    
+    return PolicyDecisionResponse(
+        allowed=allowed,
+        reason=denial_reason if not allowed else "Access granted. Device verified and compliant.",
+        has_dpa=has_dpa,
+        tpm_key_match=tpm_key_match,
+        is_compliant=active_device.is_compliant,
+        device_id=active_device.id,
+        device_name=active_device.device_name,
+        risk_level=risk_level,
+        requires_step_up=requires_step_up
     )

@@ -158,3 +158,59 @@ class SignatureService:
             logger.info(f"Signature verified successfully for device {device.device_unique_id}")
         
         return is_valid
+    
+    @staticmethod
+    async def verify_challenge_signature(
+        device,
+        challenge: str,
+        signature: str
+    ) -> bool:
+        """
+        Verify TPM signature on a challenge string
+        
+        This is used for device attestation during token issuance.
+        The challenge is signed by the device's TPM, proving the request
+        comes from the genuine enrolled device.
+        
+        The DPA signs the challenge by:
+        1. Creating a dict: {"challenge": challenge_string}
+        2. Converting to canonical JSON (sorted keys)
+        3. Base64-encoding the JSON
+        4. Signing the base64-encoded JSON with TPM
+        
+        Args:
+            device: Device object with tpm_public_key from database
+            challenge: The challenge string that was signed
+            signature: Base64-encoded TPM signature of the challenge
+            
+        Returns:
+            bool: True if signature is valid, False otherwise
+        """
+        if not device.tpm_public_key:
+            logger.error(f"Device {device.device_unique_id} has no TPM public key stored")
+            return False
+        
+        # Normalize public key format
+        normalized_key = SignatureService._normalize_public_key(device.tpm_public_key)
+        
+        # Create the challenge data dict (matching DPA's signing format)
+        # The DPA will create this same dict, convert to JSON, base64-encode, then sign
+        challenge_data = {"challenge": challenge}
+        
+        logger.info(f"Verifying challenge signature for device {device.device_unique_id}")
+        logger.debug(f"Challenge data: {challenge_data}")
+        
+        is_valid, error_msg = SignatureService.verify_tpm_signature(
+            report=challenge_data,
+            signature_base64=signature,
+            public_key_pem=normalized_key
+        )
+        
+        if not is_valid:
+            logger.warning(
+                f"Invalid challenge signature for device {device.device_unique_id}: {error_msg}"
+            )
+        else:
+            logger.info(f"Challenge signature verified successfully for device {device.device_unique_id}")
+        
+        return is_valid

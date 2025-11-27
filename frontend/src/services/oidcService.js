@@ -51,11 +51,16 @@ class OIDCService {
     const verifier = this.generateCodeVerifier();
     const challenge = await this.generateCodeChallenge(verifier);
     
+    // Normalize redirect URI (remove trailing slashes, ensure consistency)
+    const redirectUri = (window.location.origin + '/callback').replace(/\/+$/, '');
+    
+    // Store both verifier and redirect_uri to ensure exact match in callback
     localStorage.setItem('code_verifier', verifier);
+    localStorage.setItem('redirect_uri', redirectUri);
     
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
-      redirect_uri: window.location.origin + '/callback',
+      redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'openid profile email roles',
       code_challenge: challenge,
@@ -136,10 +141,19 @@ class OIDCService {
       throw new Error('Code verifier not found. Please try logging in again.');
     }
 
+    // Use the same redirect_uri that was used in the login request
+    // This ensures exact match which is required by Keycloak
+    let redirectUri = localStorage.getItem('redirect_uri');
+    if (!redirectUri) {
+      // Fallback: construct from current origin (shouldn't happen in normal flow)
+      redirectUri = (window.location.origin + '/callback').replace(/\/+$/, '');
+      console.warn('redirect_uri not found in storage, using fallback:', redirectUri);
+    }
+
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code,
-      redirect_uri: window.location.origin + '/callback',
+      redirect_uri: redirectUri, // Must match exactly what was used in login()
       client_id: CLIENT_ID,
       code_verifier: verifier,
     });
@@ -176,7 +190,9 @@ class OIDCService {
       if (id_token) {
         localStorage.setItem('id_token', id_token);
       }
+      // Clean up PKCE data after successful exchange
       localStorage.removeItem('code_verifier');
+      localStorage.removeItem('redirect_uri');
 
       // Decode and store user info
       // Always try to decode from token first (more reliable)
@@ -232,8 +248,9 @@ class OIDCService {
     } catch (error) {
       console.error('Token exchange failed:', error);
       
-      // Clear any partial state
+      // Clear any partial state (including redirect_uri)
       localStorage.removeItem('code_verifier');
+      localStorage.removeItem('redirect_uri');
       localStorage.removeItem('used_code');
       
       // Provide more helpful error messages
@@ -244,9 +261,24 @@ class OIDCService {
         
         if (status === 400) {
           const errorDesc = errorData?.error_description || errorData?.error || 'Invalid authorization code';
+          const errorCode = errorData?.error || '';
+          
+          // Handle expired_code specifically - clear PKCE data and return null to trigger re-login
+          if (errorCode === 'expired_code' || errorDesc.includes('expired') || errorDesc.includes('expired_code')) {
+            console.warn('Authorization code expired, clearing PKCE data');
+            localStorage.removeItem('code_verifier');
+            localStorage.removeItem('redirect_uri');
+            localStorage.removeItem('used_code');
+            // Return null to let callback page handle gracefully
+            return null;
+          }
+          
           // If code was already used, return null instead of throwing
-          if (errorDesc.includes('already used') || errorDesc.includes('invalid_code')) {
-            console.warn('Code already used, returning null');
+          if (errorDesc.includes('already used') || errorDesc.includes('invalid_code') || errorCode === 'invalid_grant') {
+            console.warn('Code already used or invalid, clearing PKCE data');
+            localStorage.removeItem('code_verifier');
+            localStorage.removeItem('redirect_uri');
+            localStorage.removeItem('used_code');
             return null;
           }
           throw new Error(errorDesc + '. Please try logging in again.');
@@ -378,6 +410,7 @@ class OIDCService {
     localStorage.removeItem('id_token');
     localStorage.removeItem('user_info');
     localStorage.removeItem('code_verifier');
+    localStorage.removeItem('redirect_uri');
     localStorage.removeItem('used_code');
     
     // Redirect to Keycloak logout - this will end the Keycloak session

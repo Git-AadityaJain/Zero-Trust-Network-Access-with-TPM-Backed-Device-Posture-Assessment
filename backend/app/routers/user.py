@@ -19,6 +19,7 @@ from app.schemas.user import (
     UserCreate
 )
 from app.schemas.device import DeviceResponse
+from app.schemas.device_state import DeviceStateResponse
 from app.services.user_service import UserService
 from app.services.device_service import DeviceService
 from app.services.audit_service import AuditService
@@ -62,6 +63,126 @@ async def get_current_user_with_devices(
     return UserWithDevices(
         **UserResponse.model_validate(user).model_dump(),
         devices=devices
+    )
+
+
+@router.get("/me/current-device-state", response_model=DeviceStateResponse)
+async def get_current_device_state(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get current device state for the authenticated user.
+    
+    This endpoint allows the webapp to check if the user has:
+    - A DPA agent running on their device
+    - TPM key that matches the database
+    - Compliant device posture
+    - Recent posture reports
+    
+    The webapp should call this after login to determine if the user
+    can access protected resources. The backend evaluates this based on:
+    - Latest posture submission with valid TPM signature
+    - Device enrollment and compliance status
+    - Recent activity (last_seen_at)
+    """
+    from app.models.posture_history import PostureHistory
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import desc
+    
+    # Get user's devices
+    devices = await DeviceService.get_devices_by_user(db, current_user.id)
+    
+    if not devices:
+        return DeviceStateResponse(
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=False,
+            is_enrolled=False,
+            message="No devices found for this user. Please enroll a device."
+        )
+    
+    # Find the most recently active device (has recent posture reports)
+    # Prefer enrolled and active devices
+    active_device = None
+    for device in devices:
+        if device.is_enrolled and device.status == "active":
+            # Check if device has recent posture (within last 10 minutes)
+            if device.last_posture_check:
+                time_since_posture = datetime.now(timezone.utc) - device.last_posture_check.replace(tzinfo=timezone.utc)
+                if time_since_posture < timedelta(minutes=10):
+                    active_device = device
+                    break
+    
+    # If no recent device, use the most recently seen enrolled device
+    if not active_device:
+        enrolled_devices = [d for d in devices if d.is_enrolled and d.status == "active"]
+        if enrolled_devices:
+            active_device = max(enrolled_devices, key=lambda d: d.last_seen_at or datetime.min.replace(tzinfo=timezone.utc))
+    
+    if not active_device:
+        return DeviceStateResponse(
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=False,
+            is_enrolled=False,
+            message="No active enrolled devices found. Please ensure your device is enrolled and active."
+        )
+    
+    # Check TPM key match by looking at latest posture history
+    # TPM key matches if the latest posture report had a valid signature
+    tpm_key_match = False
+    latest_posture = None
+    compliance_score = None
+    violations = None
+    
+    if active_device.tpm_public_key:
+        # Get latest posture history entry for this device
+        result = await db.execute(
+            select(PostureHistory)
+            .where(PostureHistory.device_id == active_device.id)
+            .order_by(desc(PostureHistory.checked_at))
+            .limit(1)
+        )
+        latest_posture = result.scalar_one_or_none()
+        
+        if latest_posture:
+            # TPM key matches if latest posture had valid signature
+            tpm_key_match = latest_posture.signature_valid
+            compliance_score = latest_posture.compliance_score
+            violations = latest_posture.violations
+    
+    # Determine if DPA is active (has recent posture within reasonable time)
+    has_dpa = False
+    if active_device.last_posture_check:
+        time_since_posture = datetime.now(timezone.utc) - active_device.last_posture_check.replace(tzinfo=timezone.utc)
+        # Consider DPA active if posture was received within last 15 minutes
+        has_dpa = time_since_posture < timedelta(minutes=15)
+    
+    # Build response message
+    if not has_dpa:
+        message = "DPA agent not reporting. Please ensure the DPA agent is running on your device."
+    elif not tpm_key_match:
+        message = "TPM key verification failed. Device may have been compromised or TPM key changed."
+    elif not active_device.is_compliant:
+        message = f"Device is not compliant. Violations: {violations or 'Unknown'}"
+    else:
+        message = "Device is enrolled, compliant, and TPM key matches. Access granted."
+    
+    return DeviceStateResponse(
+        has_dpa=has_dpa,
+        tpm_key_match=tpm_key_match,
+        is_compliant=active_device.is_compliant,
+        is_enrolled=active_device.is_enrolled,
+        device_id=active_device.id,
+        device_name=active_device.device_name,
+        device_unique_id=active_device.device_unique_id,
+        last_posture_time=active_device.last_posture_check,
+        last_seen_at=active_device.last_seen_at,
+        compliance_score=compliance_score,
+        violations=violations,
+        posture_data=active_device.posture_data,
+        message=message
     )
 
 
