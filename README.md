@@ -1,17 +1,27 @@
 # ZTNA Platform - Zero Trust Network Access System
 
-A comprehensive Zero Trust Network Access (ZTNA) platform with device posture assessment, policy enforcement, and secure application access.
+A comprehensive Zero Trust Network Access (ZTNA) platform with device posture assessment, TPM-based device attestation, policy enforcement, and secure application access.
+
+## 🎯 Overview
+
+The ZTNA Platform provides secure, policy-driven remote access to internal resources with continuous device posture verification. It implements Zero Trust principles by:
+
+- **Never trusting, always verifying** - Every access request is verified
+- **Device attestation** - TPM-based hardware-bound device identity
+- **Continuous posture assessment** - Real-time device compliance monitoring
+- **Policy-based access control** - Role and compliance-based resource access
+- **Audit logging** - Complete audit trail of all access decisions
 
 ## 🏗️ Architecture
 
 ### System Components
 
-- **Backend**: FastAPI (Python) with async SQLAlchemy
+- **Backend**: FastAPI (Python 3.11+) with async SQLAlchemy
 - **Frontend**: React with OIDC authentication
 - **Database**: PostgreSQL
 - **Identity Provider**: Keycloak (OIDC)
 - **Reverse Proxy**: Nginx
-- **Device Agent**: Python-based DPA (Device Posture Agent)
+- **Device Agent**: Python-based DPA (Device Posture Agent) with TPM signing
 
 ### Architecture Diagram
 
@@ -42,20 +52,27 @@ A comprehensive Zero Trust Network Access (ZTNA) platform with device posture as
                            │
                   ┌────────▼────────┐
                   │   PostgreSQL    │
-                  │   (Database)    │
-                  │   Port: 5432    │
+                  │   (Database)   │
+                  │   Port: 5432   │
+                  └─────────────────┘
+                           │
+                           │
+                  ┌────────▼────────┐
+                  │  DPA Agent      │
+                  │  (Windows)      │
+                  │  - TPM Signing  │
+                  │  - Posture      │
+                  │  - Reporting    │
                   └─────────────────┘
 ```
 
-### Authentication Flow
+### Zero Trust Flow
 
-1. User clicks "Login with Keycloak" on frontend
-2. Frontend generates PKCE code verifier and challenge
-3. Redirects to Keycloak authorization endpoint
-4. User authenticates with Keycloak
-5. Keycloak redirects back to `/callback` with authorization code
-6. Frontend exchanges code for access token
-7. Access token is used for API requests with Bearer authentication
+1. **User Authentication**: User logs in via Keycloak (OIDC)
+2. **Device Verification**: Backend checks device state (TPM key match, compliance, recent posture)
+3. **Policy Evaluation**: Backend evaluates access policies based on user role and device state
+4. **Resource Access**: Access granted only if user is authenticated AND device is compliant
+5. **Continuous Monitoring**: DPA continuously reports device posture to backend
 
 ## 📋 Prerequisites
 
@@ -63,16 +80,16 @@ A comprehensive Zero Trust Network Access (ZTNA) platform with device posture as
 - Docker and Docker Compose
 - Ports 80, 3000, 8000, 8080, 5432 available
 
+### For DPA (Device Posture Agent)
+- Windows 10/11 (64-bit)
+- TPM 2.0 enabled
+- .NET 8.0 Runtime (x64) - for TPMSigner
+- Python 3.8+ (64-bit)
+
 ### Optional (for local development)
 - Make (for convenience commands)
 - Node.js 18+ (for local frontend development)
 - Python 3.11+ (for local backend development)
-
-### For DPA (Device Posture Agent)
-- Windows 10/11 (64-bit)
-- TPM 2.0 enabled
-- .NET 6.0 Runtime (x64) - for TPMSigner
-- Python 3.8+ (64-bit)
 
 ## 🚀 Quick Start
 
@@ -126,7 +143,7 @@ cd infra && docker-compose exec backend alembic upgrade head
 - Username: `admin`
 - Password: `adminsecure123`
 
-**Note**: Change these credentials in production!
+**⚠️ Note**: Change these credentials in production!
 
 ## 📁 Project Structure
 
@@ -139,42 +156,28 @@ ztna-project/
 │   │   ├── models/           # Database models
 │   │   ├── schemas/          # Pydantic schemas
 │   │   ├── security/         # Security utilities
-│   │   ├── middleware/       # Custom middleware
 │   │   └── main.py           # Application entry point
 │   ├── alembic/              # Database migrations
 │   ├── scripts/              # Utility scripts
-│   ├── tests/                # Backend tests
 │   └── requirements.txt      # Python dependencies
 ├── frontend/                 # React frontend
 │   ├── src/
 │   │   ├── pages/            # Page components
 │   │   ├── components/       # Reusable components
 │   │   ├── services/         # API services
-│   │   ├── context/          # React context
-│   │   └── utils/            # Utility functions
-│   ├── public/               # Static assets
+│   │   └── context/          # React context
 │   └── package.json          # Node.js dependencies
 ├── dpa/                      # Device Posture Agent
 │   ├── core/                 # Core DPA functionality
 │   ├── modules/              # Posture collection modules
 │   ├── cli/                  # CLI tools
 │   ├── config/               # Configuration
-│   ├── utils/                # Utility functions
-│   └── tests/                # DPA tests
+│   └── scripts/              # Utility scripts
 ├── TPMSigner/                # C# TPM signing tool
 ├── infra/                    # Infrastructure configuration
 │   ├── docker-compose.yml    # Docker Compose configuration
-│   ├── nginx/                # Nginx configuration
-│   │   ├── conf.d/           # Nginx site configs
-│   │   └── nginx.conf        # Main Nginx config
-│   └── keycloak-setup.sh     # Keycloak setup script
-├── scripts/                  # Project-wide scripts
-│   ├── setup_cloudflare_tunnel.ps1
-│   ├── create_ngrok_config.ps1
-│   └── update_ngrok_urls.ps1
-├── tests/                    # Integration tests
-├── realm-export.json         # Keycloak realm export
-├── Makefile                  # Convenience commands
+│   └── nginx/                # Nginx configuration
+├── docs/                     # Documentation
 └── README.md                 # This file
 ```
 
@@ -190,9 +193,6 @@ make logs              # View logs from all services
 make build             # Rebuild Docker images
 make migrate           # Run database migrations
 make test-backend      # Run backend tests
-make lint-backend      # Lint backend code
-make format-backend    # Format backend code
-make clean             # Remove all containers and volumes
 ```
 
 ### Using Docker Compose
@@ -203,7 +203,6 @@ docker-compose up -d           # Start services
 docker-compose down             # Stop services
 docker-compose logs -f          # View logs
 docker-compose exec backend bash # Open backend shell
-docker-compose exec postgres psql -U ztnauser -d ztna  # Database shell
 ```
 
 ## 🔐 Authentication
@@ -224,30 +223,30 @@ The Keycloak realm is automatically imported from `realm-export.json` on first s
 
 **Clients**:
 - `admin-frontend`: Public client with PKCE (for frontend)
-- `security-admin-console`: Keycloak admin console client
 - `ZTNA-Platform-realm`: Confidential client (for backend)
-
-**Note**: When using external access (ngrok/Cloudflare), manually update client redirect URIs in Keycloak Admin Console.
 
 ## 📡 API Endpoints
 
-### Authentication Required
-All API endpoints (except health checks) require a valid JWT token in the Authorization header:
+### Public Endpoints (No Auth Required)
+- `POST /api/devices/enroll` - Device enrollment
+- `POST /api/posture/submit` - Posture data submission
+- `GET /api/devices/status/{device_id}` - Device status check
+- `GET /health` - Health check
 
+### Authenticated Endpoints
+All other endpoints require a valid JWT token:
 ```
 Authorization: Bearer <access_token>
 ```
 
 ### Main Endpoints
-
 - `GET /api/users` - List users (admin)
 - `GET /api/devices` - List devices
 - `GET /api/devices/pending` - Pending devices (admin)
+- `GET /api/users/me/current-device-state` - Current device state
 - `GET /api/policies` - List policies
 - `GET /api/audit/logs` - Audit logs
 - `GET /api/access/logs` - Access logs
-- `POST /api/devices/enroll` - Device enrollment (public)
-- `POST /api/posture/submit` - Submit posture data (public)
 
 See `/docs` for complete API documentation.
 
@@ -266,50 +265,13 @@ make test-backend
 cd backend && docker-compose exec backend pytest
 ```
 
-### Frontend Tests
+## 📚 Documentation
 
-```bash
-make test-frontend
-# Or
-cd frontend && npm test
-```
-
-## 🌐 External Access (ngrok/Cloudflare)
-
-The platform supports external access via tunneling services. Keycloak is accessible via the `/auth` path.
-
-### ngrok Setup
-
-1. **Create ngrok configuration:**
-   ```powershell
-   .\scripts\create_ngrok_config.ps1 -Authtoken "your-ngrok-token"
-   ```
-
-2. **Start ngrok tunnel:**
-   ```bash
-   ngrok start ztna
-   ```
-
-3. **Update application URLs:**
-   ```powershell
-   .\scripts\update_ngrok_urls.ps1 -NgrokUrl "https://your-ngrok-url.ngrok-free.app"
-   ```
-
-4. **Update Keycloak client redirect URIs manually:**
-   - Access Keycloak Admin: `https://your-url.ngrok-free.app/auth/admin`
-   - Go to **Clients** → **admin-frontend**
-   - Add to **Valid Redirect URIs**: `https://your-url.ngrok-free.app/callback`
-   - Add to **Web Origins**: `https://your-url.ngrok-free.app`
-   - Go to **Clients** → **security-admin-console**
-   - Add to **Valid Redirect URIs**: `https://your-url.ngrok-free.app/auth/admin/master/console/`
-   - Add to **Web Origins**: `https://your-url.ngrok-free.app`
-
-5. **Rebuild frontend** (environment variables are bundled at build time):
-   ```bash
-   cd infra && docker-compose build frontend && docker-compose up -d
-   ```
-
-**Note**: Keycloak is accessible via `/auth` path (e.g., `https://your-url.ngrok-free.app/auth/admin`)
+- **[Architecture](docs/ARCHITECTURE.md)** - Detailed system architecture
+- **[Setup Guide](docs/QUICKSTART.md)** - Detailed setup instructions
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[DPA Deployment](docs/DPA_PRODUCTION_DEPLOYMENT.md)** - DPA deployment guide
+- **[ZTNA Architecture](docs/ZTNA_ARCHITECTURE_REFACTOR.md)** - ZTNA principles implementation
 
 ## 🔧 Configuration
 
@@ -327,91 +289,20 @@ The platform supports external access via tunneling services. Keycloak is access
 - `REACT_APP_KEYCLOAK_CLIENT_ID`: Keycloak client ID
 
 **DPA (Device Posture Agent)**:
-- `DPA_BACKEND_URL`: Backend API URL (e.g., `https://your-domain.com` or `http://localhost:8000`)
-- `DPA_TPM_ENABLED`: Enable/disable TPM signing (`true`/`false`, default: `true`)
+- `DPA_BACKEND_URL`: Backend API URL
+- `DPA_TPM_ENABLED`: Enable/disable TPM signing (default: `true`)
 - `DPA_REPORTING_INTERVAL`: Posture reporting interval in seconds (default: `300`)
-
-### DPA Configuration
-
-The DPA can be configured in multiple ways:
-
-1. **Environment Variables** (recommended for remote access):
-   ```bash
-   set DPA_BACKEND_URL=https://your-domain.com
-   python -m dpa.cli.enroll_cli --enrollment-code YOUR_CODE
-   ```
-
-2. **CLI Arguments**:
-   ```bash
-   python -m dpa.cli.enroll_cli --backend-url https://your-domain.com --enrollment-code YOUR_CODE
-   ```
-
-3. **Config File** (stored in `C:\ProgramData\ZTNA\config.json`):
-   ```json
-   {
-     "backend_url": "https://your-domain.com",
-     "tpm_enabled": true,
-     "reporting_interval": 300
-   }
-   ```
-
-**DPA API Endpoints** (must match backend):
-- `POST /api/devices/enroll` - Device enrollment
-- `POST /api/posture/submit` - Posture data submission
-- `GET /api/devices/status/{device_id}` - Device status check
-
-### Nginx Configuration
-
-Nginx configuration is in `infra/nginx/conf.d/default.conf`. Modify as needed for your deployment.
 
 ## 🐛 Troubleshooting
 
-### Services won't start
+See **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** for common issues and solutions.
 
-1. Check if ports are already in use:
-   ```bash
-   netstat -tulpn | grep -E ':(80|443|3000|8000|8080|5432)'
-   ```
-
-2. Check Docker logs:
-   ```bash
-   make logs
-   ```
-
-### Database connection errors
-
-1. Ensure PostgreSQL is healthy:
-   ```bash
-   docker-compose exec postgres pg_isready
-   ```
-
-2. Check database credentials in `backend/.env`
-
-### Keycloak not accessible
-
-1. Wait for Keycloak to fully start (can take 30-60 seconds)
-2. Check Keycloak logs:
-   ```bash
-   make logs-keycloak
-   ```
-
-### Frontend can't connect to backend
-
-1. Check CORS configuration in `backend/.env`
-2. Verify API URL in frontend environment variables
-3. Check Nginx proxy configuration
-
-### External access issues (ngrok/Cloudflare)
-
-1. Ensure Keycloak client redirect URIs are updated with external URL
-2. Rebuild frontend after changing environment variables
-3. Verify Nginx is correctly routing `/auth` to Keycloak
-4. Check that `X-Forwarded-Proto` header is set to `https` in Nginx config
-
-## 📚 Additional Information
-
-- **API Documentation**: http://localhost:8000/docs - Interactive Swagger UI
-- **System Architecture**: See Architecture section below
+Common issues:
+- Device enrollment conflicts
+- TPM key issues
+- Database connection errors
+- Authentication problems
+- Posture reporting issues
 
 ## 🔒 Security Notes
 

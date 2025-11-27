@@ -28,7 +28,11 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo Copying to parent directory...
-copy /Y bin\Release\net6.0-windows\win-x64\publish\TPMSigner.exe ..\TPMSigner.exe
+copy /Y bin\Release\net8.0-windows\win-x64\publish\TPMSigner.exe ..\TPMSigner.exe
+
+echo.
+echo Copying to dpa directory...
+copy /Y bin\Release\net8.0-windows\win-x64\publish\TPMSigner.exe ..\dpa\TPMSigner.exe
 
 echo.
 echo ========================================

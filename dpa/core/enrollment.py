@@ -101,7 +101,9 @@ class DeviceEnrollment:
             }
             
             # Step 4: Send enrollment request to backend
-            url = f"{self.config.backend_url}/api/devices/enroll"
+            # Remove trailing slash from backend_url to avoid double slashes
+            backend_url = self.config.backend_url.rstrip("/")
+            url = f"{backend_url}/api/devices/enroll"
             logger.info(f"Sending enrollment request to {url}")
             
             response = requests.post(url, json=enrollment_payload, timeout=30)

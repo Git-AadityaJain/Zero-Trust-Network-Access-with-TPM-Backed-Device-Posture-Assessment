@@ -38,6 +38,50 @@ The ZTNA Platform is a comprehensive Zero Trust Network Access system that provi
                   └─────────────────┘
 ```
 
+## Zero Trust Architecture
+
+The platform implements Zero Trust principles where:
+- **Never trust, always verify** - Every access request is verified
+- **Device attestation** - TPM-based hardware-bound device identity
+- **Continuous posture assessment** - Real-time device compliance monitoring
+- **Policy-based access control** - Role and compliance-based resource access
+
+### Zero Trust Flow
+
+```
+┌─────────────┐                    ┌──────────────┐                    ┌─────────────┐
+│   Browser   │                    │   Backend    │                    │  DPA Agent  │
+│  (Webapp)   │                    │   Server     │                    │  (Windows)  │
+└──────┬──────┘                    └──────┬───────┘                    └──────┬──────┘
+       │                                   │                                   │
+       │ 1. Login (OIDC/JWT)              │                                   │
+       ├──────────────────────────────────>│                                   │
+       │                                   │                                   │
+       │ 2. GET /api/user/current-device-state                              │
+       ├──────────────────────────────────>│                                   │
+       │                                   │                                   │
+       │                                   │ 3. Check DB:                      │
+       │                                   │    - User's devices               │
+       │                                   │    - Latest posture               │
+       │                                   │    - TPM key match                │
+       │                                   │    - Compliance status            │
+       │                                   │                                   │
+       │ 4. Response: {hasDpa, tpmKeyMatch, compliant, ...}                 │
+       │<──────────────────────────────────┤                                   │
+       │                                   │                                   │
+       │                                   │                                   │
+       │                                   │ 5. POST /api/posture/submit       │
+       │                                   │<───────────────────────────────────┤
+       │                                   │                                   │
+       │                                   │ 6. Verify TPM signature           │
+       │                                   │    Update device state             │
+       │                                   │                                   │
+       │                                   │ 7. Response: {status, compliant}   │
+       │                                   │───────────────────────────────────>│
+       │                                   │                                   │
+       │                                   │ (Continuous - every 5 min)       │
+```
+
 ## Data Flow
 
 ### Authentication Flow
@@ -57,6 +101,21 @@ The ZTNA Platform is a comprehensive Zero Trust Network Access system that provi
    - Frontend includes access token in Authorization header
    - Backend validates token with Keycloak JWKS
    - Backend extracts user info and roles from token
+
+### Device State Verification
+
+1. **Frontend Checks Device State**:
+   - Frontend calls `GET /api/users/me/current-device-state`
+   - Backend checks:
+     - User's enrolled devices
+     - Latest posture report (within threshold)
+     - TPM key verification status
+     - Device compliance status
+
+2. **Access Decision**:
+   - If device is compliant and verified → Allow access
+   - If device is non-compliant → Deny access or require step-up
+   - If no device enrolled → Prompt for enrollment
 
 ### Device Enrollment Flow
 
@@ -128,10 +187,13 @@ users (1) ────< (many) audit_logs
 
 ### Device Security
 
-- **Hardware fingerprinting** (SHA256 hash)
-- **TPM-based signing** for posture data
-- **HMAC signatures** as fallback
-- **Enrollment code** validation
+- **Hardware fingerprinting** (SHA256 hash of motherboard serial, BIOS serial, system UUID)
+- **Fallback identifiers** (hostname, MAC address, Machine GUID) when hardware IDs unavailable
+- **TPM-based signing** for posture data (RSA-PSS with SHA256)
+- **HMAC signatures** as fallback (if TPM unavailable)
+- **Enrollment code** validation (one-time use codes)
+- **Continuous posture reporting** (default: every 5 minutes)
+- **Signature verification** on every posture submission
 
 ### Network Security
 
