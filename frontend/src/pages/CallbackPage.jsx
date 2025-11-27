@@ -9,6 +9,8 @@ export default function CallbackPage() {
   const [error, setError] = useState(null);
   const processingRef = useRef(false);
   const processedRef = useRef(false);
+  const redirectCheckIntervalRef = useRef(null);
+  const timeoutIdRef = useRef(null);
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -34,15 +36,10 @@ export default function CallbackPage() {
       return;
     }
     
-    // Prevent duplicate processing - use refs to persist across renders
-    if (processingRef.current) {
-      console.log('Callback already processing, skipping');
-      return;
-    }
-    
+    // If already processed, check for session and redirect immediately
+    // This handles the case where processing completed but redirect didn't happen
     if (processedRef.current) {
       console.log('Callback already processed, checking for session');
-      // If already processed, check for session and redirect
       if (hasToken && hasUserInfo) {
         console.log('Session exists, checking role for redirect');
         try {
@@ -50,14 +47,45 @@ export default function CallbackPage() {
           const roles = user.realm_access?.roles || [];
           const isAdmin = roles.includes('admin');
           const redirectPath = isAdmin ? '/dashboard' : '/user-dashboard';
+          console.log(`Redirecting to: ${redirectPath} (from processed check)`);
           window.location.replace(redirectPath);
         } catch (e) {
+          console.error('Failed to parse user info, redirecting to login');
           window.location.replace('/login');
         }
       } else {
         console.log('No session found, redirecting to login');
         window.location.replace('/login');
       }
+      return;
+    }
+    
+    // Prevent duplicate processing - use refs to persist across renders
+    if (processingRef.current) {
+      console.log('Callback already processing, skipping');
+      // But still check if processing completed in the meantime
+      // This handles race conditions where processing finished between renders
+      setTimeout(() => {
+        if (hasToken && hasUserInfo && !processedRef.current) {
+          // Processing might have completed, check again
+          const checkToken = localStorage.getItem('access_token');
+          const checkUser = localStorage.getItem('user_info');
+          if (checkToken && checkUser) {
+            console.log('Processing completed, redirecting now');
+            try {
+              const user = JSON.parse(checkUser);
+              const roles = user.realm_access?.roles || [];
+              const isAdmin = roles.includes('admin');
+              const redirectPath = isAdmin ? '/dashboard' : '/user-dashboard';
+              processedRef.current = true;
+              processingRef.current = false;
+              window.location.replace(redirectPath);
+            } catch (e) {
+              window.location.replace('/login');
+            }
+          }
+        }
+      }, 100);
       return;
     }
 
@@ -74,10 +102,47 @@ export default function CallbackPage() {
       console.log('Processing callback with code:', code.substring(0, 8) + '...');
       console.log('Full callback URL:', window.location.href);
       
+      // Set up a polling mechanism to check if authentication completed
+      // This ensures redirect happens even if promise handler doesn't execute
+      redirectCheckIntervalRef.current = setInterval(() => {
+        if (!isMounted) {
+          if (redirectCheckIntervalRef.current) {
+            clearInterval(redirectCheckIntervalRef.current);
+            redirectCheckIntervalRef.current = null;
+          }
+          return;
+        }
+        
+        // If processing is complete but we're still on callback page, redirect
+        const checkToken = localStorage.getItem('access_token');
+        const checkUser = localStorage.getItem('user_info');
+        if (checkToken && checkUser && processedRef.current) {
+          console.log('Polling check: Authentication complete, redirecting now');
+          if (redirectCheckIntervalRef.current) {
+            clearInterval(redirectCheckIntervalRef.current);
+            redirectCheckIntervalRef.current = null;
+          }
+          try {
+            const user = JSON.parse(checkUser);
+            const roles = user.realm_access?.roles || [];
+            const isAdmin = roles.includes('admin');
+            const redirectPath = isAdmin ? '/dashboard' : '/user-dashboard';
+            window.location.replace(redirectPath);
+          } catch (e) {
+            console.error('Polling check: Failed to parse user info');
+            window.location.replace('/login');
+          }
+        }
+      }, 500); // Check every 500ms
+      
       // Set a timeout to prevent infinite hanging
-      const timeoutId = setTimeout(() => {
+      timeoutIdRef.current = setTimeout(() => {
         if (isMounted && !processedRef.current) {
           console.error('Callback processing timeout after 15 seconds');
+          if (redirectCheckIntervalRef.current) {
+            clearInterval(redirectCheckIntervalRef.current);
+            redirectCheckIntervalRef.current = null;
+          }
           processedRef.current = true;
           processingRef.current = false;
           setError('Authentication timeout. Please try again.');
@@ -89,7 +154,14 @@ export default function CallbackPage() {
       
       handleCallback(code)
         .then((result) => {
-          clearTimeout(timeoutId);
+          if (timeoutIdRef.current) {
+            clearTimeout(timeoutIdRef.current);
+            timeoutIdRef.current = null;
+          }
+          if (redirectCheckIntervalRef.current) {
+            clearInterval(redirectCheckIntervalRef.current);
+            redirectCheckIntervalRef.current = null;
+          }
           if (!isMounted) return;
           
           if (processedRef.current) {
@@ -97,6 +169,7 @@ export default function CallbackPage() {
             return;
           }
           
+          // Mark as processed early to prevent duplicate processing
           processedRef.current = true;
           processingRef.current = false;
           
@@ -135,8 +208,13 @@ export default function CallbackPage() {
             const isAdmin = userRoles.includes('admin');
             const redirectPath = isAdmin ? '/dashboard' : '/user-dashboard';
             console.log(`User roles: [${userRoles.join(', ')}], redirecting to: ${redirectPath}`);
+            // Mark as processed BEFORE redirect to prevent re-processing
+            processedRef.current = true;
+            processingRef.current = false;
             // Use window.location.replace to prevent back button issues
+            // Execute redirect immediately and synchronously
             window.location.replace(redirectPath);
+            return; // Exit early to prevent any further execution
           } else {
             console.error('Invalid result from handleCallback:', result);
             // Check if tokens exist anyway (might have been stored)
@@ -162,7 +240,14 @@ export default function CallbackPage() {
           }
         })
         .catch((err) => {
-          clearTimeout(timeoutId);
+          if (timeoutIdRef.current) {
+            clearTimeout(timeoutIdRef.current);
+            timeoutIdRef.current = null;
+          }
+          if (redirectCheckIntervalRef.current) {
+            clearInterval(redirectCheckIntervalRef.current);
+            redirectCheckIntervalRef.current = null;
+          }
           if (!isMounted) return;
           
           if (processedRef.current) {
@@ -216,6 +301,14 @@ export default function CallbackPage() {
 
     return () => {
       isMounted = false;
+      if (timeoutIdRef.current) {
+        clearTimeout(timeoutIdRef.current);
+        timeoutIdRef.current = null;
+      }
+      if (redirectCheckIntervalRef.current) {
+        clearInterval(redirectCheckIntervalRef.current);
+        redirectCheckIntervalRef.current = null;
+      }
     };
   }, [searchParams, handleCallback, navigate]);
 
