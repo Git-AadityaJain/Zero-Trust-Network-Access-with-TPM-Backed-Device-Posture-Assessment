@@ -10,7 +10,7 @@ export default function Layout({ children }) {
 
   const navigation = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', role: 'admin' },
-    { name: 'Resources', path: '/user-dashboard', icon: '📁', hideIfAdmin: true },
+    { name: 'Resources', path: '/user-dashboard', icon: '📁' },
     { name: 'Devices', path: '/devices', icon: '💻', role: 'admin' },
     { name: 'Pending Devices', path: '/devices/pending', icon: '⏳', role: 'admin' },
     { name: 'Enrollment Codes', path: '/enrollment', icon: '🔑', role: 'admin' },
@@ -36,12 +36,20 @@ export default function Layout({ children }) {
     if (item.role && !hasRole(item.role)) {
       return false;
     }
-    // Hide user dashboard if user is admin
-    if (item.hideIfAdmin && hasRole('admin')) {
-      return false;
-    }
     return true;
   });
+
+  // Get Keycloak admin console URL
+  const getKeycloakAdminUrl = () => {
+    const keycloakUrl = process.env.REACT_APP_KEYCLOAK_URL || 'http://localhost:8080';
+    const realm = process.env.REACT_APP_KEYCLOAK_REALM || 'master';
+    // Keycloak admin console is at /admin/{realm}/console/
+    return `${keycloakUrl}/admin/${realm}/console/`;
+  };
+
+  const handleKeycloakAdminClick = () => {
+    window.open(getKeycloakAdminUrl(), '_blank');
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -99,6 +107,16 @@ export default function Layout({ children }) {
                 </p>
               </div>
             </div>
+            {hasRole('admin') && (
+              <button
+                onClick={handleKeycloakAdminClick}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg transition-colors text-sm font-medium mb-2 flex items-center justify-center space-x-2"
+                title="Open Keycloak Admin Console"
+              >
+                <span>🔐</span>
+                <span>Keycloak Admin</span>
+              </button>
+            )}
             <button
               onClick={handleLogout}
               className="w-full bg-gray-800 hover:bg-gray-700 text-white py-2 px-4 rounded-lg transition-colors text-sm font-medium"

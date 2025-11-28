@@ -22,6 +22,13 @@ export default function UserDashboard() {
         return;
       }
 
+      // Check if user has dpa-device role - required for access
+      if (!hasRole('dpa-device') && !hasRole('admin')) {
+        setLoading(false);
+        setError('Access denied. You must have the dpa-device role to access resources. Please ensure your device is enrolled and compliant.');
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -209,12 +216,24 @@ export default function UserDashboard() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6">
           <div className="flex items-start">
-            <div className="text-2xl mr-3">❌</div>
-            <div>
-              <h3 className="text-sm font-semibold text-red-900 mb-1">Error</h3>
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="text-3xl mr-4">🚫</div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-red-900 mb-2">Access Denied</h3>
+              <p className="text-sm text-red-800 mb-3">{error}</p>
+              {error.includes('dpa-device role') && (
+                <div className="bg-white border border-red-200 rounded p-3 mt-3">
+                  <p className="text-xs text-gray-700">
+                    <strong>What you need to do:</strong>
+                  </p>
+                  <ul className="text-xs text-gray-600 mt-2 list-disc list-inside space-y-1">
+                    <li>Ensure your device is enrolled in the system</li>
+                    <li>Make sure your device is compliant with security policies</li>
+                    <li>Contact your administrator if you believe you should have access</li>
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -20,7 +20,7 @@ import app.models.audit_log
 import app.models.access_log
 
 # Import routers directly (not from __init__.py)
-from app.routers import user, device, enrollment, posture, policy, audit, access, health, token, role, resources
+from app.routers import user, device, enrollment, posture, policy, audit, access, health, token, role, resources, session
 
 # Import error handlers
 from app.middleware.error_handlers import (
@@ -94,6 +94,7 @@ app.include_router(access.router, prefix="/api")
 app.include_router(token.router, prefix="/api")
 app.include_router(role.router, prefix="/api")
 app.include_router(resources.router, prefix="/api")
+app.include_router(session.router, prefix="/api")
 
 # Root endpoint
 @app.get("/")

@@ -196,9 +196,9 @@ class KeycloakService:
                 
                 logger.info(f"Successfully created Keycloak user: {username} (ID: {user_id})")
                 
-                # Set temporary password if provided
+                # Set password if provided (always permanent, no password change required)
                 if temporary_password and user_id:
-                    await self.set_user_password(user_id, temporary_password, temporary=True)
+                    await self.set_user_password(user_id, temporary_password, temporary=False)
                 
                 return user_id
             
@@ -752,6 +752,134 @@ class KeycloakService:
         except Exception as e:
             logger.error(f"Error getting attribute {attribute_name} for user {user_id}: {e}")
             return None
+    
+    # ==================== SESSION MANAGEMENT ====================
+    
+    async def get_user_sessions(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all active sessions for a user
+        
+        Args:
+            user_id: Keycloak user ID
+            
+        Returns:
+            List of session dictionaries
+        """
+        try:
+            response = await self._make_request(
+                "GET",
+                f"/users/{user_id}/sessions"
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                raise KeycloakUserNotFoundError(f"User {user_id} not found")
+            else:
+                logger.error(f"Failed to get user sessions: {response.status_code}")
+                return []
+                
+        except KeycloakUserNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting sessions for user {user_id}: {e}")
+            return []
+    
+    async def logout_user_session(self, user_id: str, session_id: str) -> bool:
+        """
+        Logout a specific session for a user
+        
+        Args:
+            user_id: Keycloak user ID
+            session_id: Session ID to logout
+            
+        Returns:
+            True if successful
+        """
+        try:
+            response = await self._make_request(
+                "DELETE",
+                f"/users/{user_id}/sessions/{session_id}"
+            )
+            
+            if response.status_code == 204:
+                logger.info(f"Successfully logged out session {session_id} for user {user_id}")
+                return True
+            elif response.status_code == 404:
+                logger.warning(f"Session {session_id} not found for user {user_id}")
+                return False
+            else:
+                logger.error(f"Failed to logout session: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error logging out session {session_id} for user {user_id}: {e}")
+            return False
+    
+    async def logout_all_user_sessions(self, user_id: str) -> bool:
+        """
+        Logout all active sessions for a user
+        
+        Args:
+            user_id: Keycloak user ID
+            
+        Returns:
+            True if successful
+        """
+        try:
+            response = await self._make_request(
+                "POST",
+                f"/users/{user_id}/logout"
+            )
+            
+            if response.status_code == 204:
+                logger.info(f"Successfully logged out all sessions for user {user_id}")
+                return True
+            elif response.status_code == 404:
+                raise KeycloakUserNotFoundError(f"User {user_id} not found")
+            else:
+                logger.error(f"Failed to logout all sessions: {response.status_code}")
+                return False
+                
+        except KeycloakUserNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error logging out all sessions for user {user_id}: {e}")
+            return False
+    
+    async def logout_other_user_sessions(self, user_id: str, current_session_id: str) -> int:
+        """
+        Logout all sessions for a user except the current one
+        This enforces single-session-per-user policy
+        
+        Args:
+            user_id: Keycloak user ID
+            current_session_id: Session ID to keep active
+            
+        Returns:
+            Number of sessions logged out
+        """
+        try:
+            sessions = await self.get_user_sessions(user_id)
+            if not sessions:
+                return 0
+            
+            logged_out_count = 0
+            for session in sessions:
+                session_id = session.get("id")
+                if session_id and session_id != current_session_id:
+                    success = await self.logout_user_session(user_id, session_id)
+                    if success:
+                        logged_out_count += 1
+            
+            if logged_out_count > 0:
+                logger.info(f"Logged out {logged_out_count} other session(s) for user {user_id}")
+            
+            return logged_out_count
+                
+        except Exception as e:
+            logger.error(f"Error logging out other sessions for user {user_id}: {e}")
+            return 0
     
     # ==================== UTILITY METHODS ====================
     

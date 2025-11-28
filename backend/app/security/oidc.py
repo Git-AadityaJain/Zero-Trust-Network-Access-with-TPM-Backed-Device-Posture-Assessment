@@ -35,6 +35,9 @@ class TokenPayload(BaseModel):
     # Device & Posture fields
     device_id: Optional[str] = None
     posture_passed: Optional[bool] = None
+    
+    # Session field
+    sid: Optional[str] = None  # Session ID
 
 
 def get_jwks():
@@ -251,7 +254,8 @@ def verify_jwt_token(token: str) -> TokenPayload:
             family_name=payload.get("family_name"),
             email_verified=payload.get("email_verified", False),
             device_id=payload.get("device_id"),
-            posture_passed=payload.get("posture_passed")
+            posture_passed=payload.get("posture_passed"),
+            sid=payload.get("sid")  # Session ID
         )
         
         return token_data

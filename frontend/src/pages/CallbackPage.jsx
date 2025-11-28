@@ -154,6 +154,9 @@ export default function CallbackPage() {
       
       handleCallback(code)
         .then((result) => {
+          console.log('🔵 handleCallback result received:', result ? 'result exists' : 'result is null');
+          console.log('🔵 Result structure:', result ? Object.keys(result) : 'no result');
+          
           if (timeoutIdRef.current) {
             clearTimeout(timeoutIdRef.current);
             timeoutIdRef.current = null;
@@ -162,24 +165,19 @@ export default function CallbackPage() {
             clearInterval(redirectCheckIntervalRef.current);
             redirectCheckIntervalRef.current = null;
           }
-          if (!isMounted) return;
           
           if (processedRef.current) {
-            console.log('Already processed, skipping');
+            console.log('🔵 Already processed, skipping');
             return;
           }
           
-          // Mark as processed early to prevent duplicate processing
-          processedRef.current = true;
-          processingRef.current = false;
-          
           // Handle null result (code was used but no tokens)
           if (result === null || !result) {
-            console.log('Code was used or no result, checking for existing session');
+            console.log('🔵 Code was used or no result, checking for existing session');
             const hasToken = localStorage.getItem('access_token');
             const storedUser = localStorage.getItem('user_info');
             if (hasToken && storedUser) {
-              console.log('Found existing session, checking role for redirect');
+              console.log('🔵 Found existing session, checking role for redirect');
               try {
                 const user = JSON.parse(storedUser);
                 const roles = user.realm_access?.roles || [];
@@ -192,7 +190,7 @@ export default function CallbackPage() {
               return;
             }
             // No valid session, redirect to login
-            console.log('No valid session found, redirecting to login');
+            console.log('🔵 No valid session found, redirecting to login');
             setError('Session expired. Please log in again.');
             setTimeout(() => {
               window.location.replace('/login');
@@ -201,18 +199,72 @@ export default function CallbackPage() {
           }
           
           // Result should have both access_token and userInfo
+          console.log('🔵 Checking result structure:', {
+            hasResult: !!result,
+            hasUserInfo: !!result?.userInfo,
+            hasAccessToken: !!result?.access_token
+          });
+          
           if (result && result.userInfo && result.access_token) {
-            console.log('Authentication successful, checking user role for redirect');
+            console.log('✅ Authentication successful, enforcing single session');
+            
+            // CRITICAL: Enforce session BEFORE marking as processed or redirecting
+            // This ensures it runs even if component unmounts
+            const apiUrl = process.env.REACT_APP_API_URL || window.location.origin + '/api';
+            const token = result.access_token;
+            
+            // Remove trailing /api if present to avoid double /api/api
+            const baseUrl = apiUrl.endsWith('/api') ? apiUrl : apiUrl + '/api';
+            const enforceUrl = `${baseUrl}/session/enforce-single`;
+            
+            console.log('📞 Calling enforce-single endpoint:', enforceUrl);
+            
+            // Start the session enforcement immediately (fire and forget)
+            // Don't await - let it run in background while we redirect
+            // Use keepalive: true to ensure request completes even after page navigation
+            fetch(enforceUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              keepalive: true  // Allow request to complete even after page navigation
+            })
+            .then((enforceResponse) => {
+              console.log('📞 Enforce-single response status:', enforceResponse.status);
+              if (enforceResponse.ok) {
+                return enforceResponse.json();
+              } else {
+                return enforceResponse.text().then(text => {
+                  throw new Error(`HTTP ${enforceResponse.status}: ${text}`);
+                });
+              }
+            })
+            .then((sessionInfo) => {
+              console.log('✅ Session enforcement result:', sessionInfo);
+              if (sessionInfo.logged_out_count > 0) {
+                console.log(`✅ Enforced single session: logged out ${sessionInfo.logged_out_count} other session(s)`);
+              } else {
+                console.log('ℹ️ User already has only one active session');
+              }
+            })
+            .catch((enforceError) => {
+              console.error('❌ Error enforcing single session:', enforceError);
+              // Continue with login even if session enforcement fails
+            });
+            
+            // Mark as processed and redirect
+            processedRef.current = true;
+            processingRef.current = false;
+            
             // Check user role and redirect accordingly
             const userRoles = result.userInfo.realm_access?.roles || [];
             const isAdmin = userRoles.includes('admin');
             const redirectPath = isAdmin ? '/dashboard' : '/user-dashboard';
-            console.log(`User roles: [${userRoles.join(', ')}], redirecting to: ${redirectPath}`);
-            // Mark as processed BEFORE redirect to prevent re-processing
-            processedRef.current = true;
-            processingRef.current = false;
+            console.log(`🔄 User roles: [${userRoles.join(', ')}], redirecting to: ${redirectPath}`);
+            
             // Use window.location.replace to prevent back button issues
-            // Execute redirect immediately and synchronously
+            // Execute redirect immediately
             window.location.replace(redirectPath);
             return; // Exit early to prevent any further execution
           } else {
