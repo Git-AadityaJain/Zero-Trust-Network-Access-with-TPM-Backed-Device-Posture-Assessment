@@ -1,4 +1,4 @@
-{
+﻿{
     "id":  "2c5c116c-b79e-4d71-b0d8-b1d73573ef26",
     "realm":  "master",
     "displayName":  "Keycloak",
@@ -855,15 +855,13 @@
                                              "http://localhost:3000/callback",
                                              "http://localhost/callback",
                                              "http://152.58.31.27/callback",
-                                             "https://b64e34aa6da9.ngrok-free.app/callback",
-                                             "https://609b9c24fbd6.ngrok-free.app/callback"
+                                             "https://unimplied-untranscendental-denita.ngrok-free.dev/callback"
                                          ],
                         "webOrigins":  [
                                            "http://localhost:3000",
                                            "http://localhost",
                                            "http://152.58.31.27",
-                                           "https://b64e34aa6da9.ngrok-free.app",
-                                           "https://609b9c24fbd6.ngrok-free.app"
+                                           "https://unimplied-untranscendental-denita.ngrok-free.dev"
                                        ],
                         "notBefore":  0,
                         "bearerOnly":  false,
@@ -877,7 +875,7 @@
                         "protocol":  "openid-connect",
                         "attributes":  {
                                            "pkce.code.challenge.method":  "S256",
-                                           "post.logout.redirect.uris":  "http://localhost:3000/login,http://localhost/login,http://152.58.31.27/login,https://b64e34aa6da9.ngrok-free.app/login,https://609b9c24fbd6.ngrok-free.app/login"
+                                           "post.logout.redirect.uris":  "http://localhost:3000/login,http://localhost/login,http://152.58.31.27/login,https://unimplied-untranscendental-denita.ngrok-free.dev/login"
                                        },
                         "authenticationFlowBindingOverrides":  {
 

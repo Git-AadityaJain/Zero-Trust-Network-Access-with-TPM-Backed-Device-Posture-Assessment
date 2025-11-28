@@ -37,7 +37,7 @@ services:
       - KC_PROXY_ADDRESS_FORWARDING=true
       # Set hostname (extract from EXTERNAL_KEYCLOAK_URL if set)
       # Format: hostname only (e.g., 609b9c24fbd6.ngrok-free.app)
-      - KC_HOSTNAME=${KC_HOSTNAME:-609b9c24fbd6.ngrok-free.app}
+      - KC_HOSTNAME=${KC_HOSTNAME:-unimplied-untranscendental-denita.ngrok-free.dev}
       # Trust proxy headers (important for HTTPS detection)
       - KC_PROXY_HEADERS=xforwarded
     ports:
