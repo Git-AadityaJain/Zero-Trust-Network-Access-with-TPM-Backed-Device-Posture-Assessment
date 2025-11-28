@@ -86,3 +86,4 @@ docker-compose up -d frontend
 - **Cause**: Session ID not in token, or Keycloak API issue
 - **Fix**: Check backend logs for Keycloak errors
 
+

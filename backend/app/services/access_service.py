@@ -1,6 +1,6 @@
 # services/access_service.py
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.access_log import AccessLog
@@ -20,7 +20,7 @@ class AccessService:
     @staticmethod
     async def log_access(
         db: AsyncSession,
-        device_id: int,
+        device_id: Optional[int],
         resource_accessed: str,
         access_type: str,
         access_granted: bool,
@@ -28,7 +28,8 @@ class AccessService:
         policy_id: Optional[int] = None,
         policy_name: Optional[str] = None,
         source_ip: Optional[str] = None,
-        destination_ip: Optional[str] = None
+        destination_ip: Optional[str] = None,
+        request_metadata: Optional[Dict[str, Any]] = None
     ) -> AccessLog:
         """Convenience method to log an access attempt"""
         access_data = AccessLogCreate(
@@ -40,7 +41,8 @@ class AccessService:
             policy_id=policy_id,
             policy_name=policy_name,
             source_ip=source_ip,
-            destination_ip=destination_ip
+            destination_ip=destination_ip,
+            request_metadata=request_metadata
         )
         return await AccessService.create_access_log(db, access_data)
 
@@ -55,7 +57,10 @@ class AccessService:
         end_date: Optional[datetime] = None
     ) -> List[AccessLog]:
         """Get access logs with filters"""
-        query = select(AccessLog)
+        from app.models.device import Device
+        from sqlalchemy.orm import selectinload
+        
+        query = select(AccessLog).options(selectinload(AccessLog.device))
         
         if device_id:
             query = query.where(AccessLog.device_id == device_id)

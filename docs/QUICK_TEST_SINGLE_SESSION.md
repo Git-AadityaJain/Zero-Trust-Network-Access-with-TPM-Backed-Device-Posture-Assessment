@@ -62,3 +62,4 @@ Enforced single session: logged out X other session(s)
 3. Verify the frontend is calling `/api/session/enforce-single`
 4. Check network tab in DevTools for the API call
 
+

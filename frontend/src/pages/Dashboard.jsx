@@ -83,15 +83,21 @@ export default function Dashboard() {
             </p>
           </Link>
 
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 hover:bg-blue-100 transition no-underline">
+          <Link
+            to="/devices"
+            className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 hover:bg-blue-100 transition no-underline"
+          >
             <p className="text-lg font-semibold text-blue-900">View All Devices</p>
             <p className="text-blue-700 text-sm mt-1">Manage and monitor device posture</p>
-          </div>
+          </Link>
 
-          <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4 hover:bg-purple-100 transition no-underline">
+          <Link
+            to="/audit"
+            className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4 hover:bg-purple-100 transition no-underline"
+          >
             <p className="text-lg font-semibold text-purple-900">Audit Logs</p>
             <p className="text-purple-700 text-sm mt-1">Track all admin actions and changes</p>
-          </div>
+          </Link>
         </div>
       </div>
 

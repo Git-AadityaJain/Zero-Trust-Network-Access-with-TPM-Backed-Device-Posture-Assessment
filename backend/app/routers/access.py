@@ -94,7 +94,14 @@ async def get_access_logs(
         start_date=start_date,
         end_date=end_date
     )
-    return [AccessLogResponse.model_validate(log) for log in logs]
+    # Convert to response with device name
+    response_logs = []
+    for log in logs:
+        log_dict = AccessLogResponse.model_validate(log).model_dump()
+        if log.device:
+            log_dict['device_name'] = log.device.device_name
+        response_logs.append(AccessLogResponse(**log_dict))
+    return response_logs
 
 @router.get("/device/{device_id}", response_model=List[AccessLogResponse])
 async def get_device_access_logs(
@@ -134,7 +141,14 @@ async def get_device_access_logs(
         start_date=start_date,
         end_date=end_date
     )
-    return [AccessLogResponse.model_validate(log) for log in logs]
+    # Convert to response with device name
+    response_logs = []
+    for log in logs:
+        log_dict = AccessLogResponse.model_validate(log).model_dump()
+        if log.device:
+            log_dict['device_name'] = log.device.device_name
+        response_logs.append(AccessLogResponse(**log_dict))
+    return response_logs
 
 @router.get("/me/devices", response_model=List[AccessLogResponse])
 async def get_my_devices_access_logs(
@@ -167,8 +181,12 @@ async def get_my_devices_access_logs(
             start_date=start_date,
             end_date=end_date
         )
-        # Convert to schemas
-        all_logs.extend([AccessLogResponse.model_validate(log) for log in logs])
+        # Convert to schemas with device name
+        for log in logs:
+            log_dict = AccessLogResponse.model_validate(log).model_dump()
+            if log.device:
+                log_dict['device_name'] = log.device.device_name
+            all_logs.append(AccessLogResponse(**log_dict))
     
     # Sort by accessed_at descending and apply pagination
     all_logs.sort(key=lambda x: x.accessed_at, reverse=True)
@@ -192,7 +210,14 @@ async def get_denied_access_logs(
         start_date=start_date,
         end_date=end_date
     )
-    return [AccessLogResponse.model_validate(log) for log in logs]
+    # Convert to response with device name
+    response_logs = []
+    for log in logs:
+        log_dict = AccessLogResponse.model_validate(log).model_dump()
+        if log.device:
+            log_dict['device_name'] = log.device.device_name
+        response_logs.append(AccessLogResponse(**log_dict))
+    return response_logs
 
 
 @router.post("/request", response_model=AccessResponse)
@@ -395,6 +420,7 @@ async def request_access(
 @router.post("/decision", response_model=PolicyDecisionResponse)
 async def policy_decision(
     request_data: PolicyDecisionRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_active_user),
     http_request: Request = None,
     db: AsyncSession = Depends(get_db)
@@ -416,6 +442,39 @@ async def policy_decision(
     from app.models.posture_history import PostureHistory
     from sqlalchemy import select, desc
     
+    # Check if user has dpa-device role
+    user_roles = []
+    try:
+        token = credentials.credentials
+        token_payload = verify_jwt_token(token)
+        user_roles = token_payload.roles or []
+    except Exception as e:
+        logger.warning(f"Failed to extract roles from token: {e}")
+        user_roles = []
+    
+    has_dpa_device_role = "dpa-device" in user_roles or "admin" in user_roles
+    
+    if not has_dpa_device_role:
+        # Log access denial for missing dpa-device role
+        await AccessService.log_access(
+            db=db,
+            device_id=None,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="User does not have dpa-device role. Please ensure your device is enrolled and compliant.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="User does not have dpa-device role. Please ensure your device is enrolled and compliant.",
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=False,
+            risk_level="high",
+            requires_step_up=True
+        )
+    
     # Get user's devices
     devices = await DeviceService.get_devices_by_user(db, current_user.id)
     
@@ -425,6 +484,16 @@ async def policy_decision(
     
     # No devices = high risk
     if not devices:
+        # Log access denial
+        await AccessService.log_access(
+            db=db,
+            device_id=None,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="No enrolled devices found. Please enroll a device to access resources.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
         return PolicyDecisionResponse(
             allowed=False,
             reason="No enrolled devices found. Please enroll a device to access resources.",
@@ -452,6 +521,16 @@ async def policy_decision(
     
     # No active device = high risk
     if not active_device:
+        # Log access denial
+        await AccessService.log_access(
+            db=db,
+            device_id=None,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="No active enrolled device found. Please ensure your device is enrolled and reporting posture.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
         return PolicyDecisionResponse(
             allowed=False,
             reason="No active enrolled device found. Please ensure your device is enrolled and reporting posture.",
@@ -462,8 +541,9 @@ async def policy_decision(
             requires_step_up=True
         )
     
-    # Check TPM key match
+    # Check TPM key match and posture history
     tpm_key_match = False
+    has_posture_history = False
     if active_device.tpm_public_key:
         result = await db.execute(
             select(PostureHistory)
@@ -473,10 +553,53 @@ async def policy_decision(
         )
         latest_posture = result.scalar_one_or_none()
         if latest_posture:
+            has_posture_history = True
             tpm_key_match = latest_posture.signature_valid
+    else:
+        # Check if there's any posture history even without TPM key
+        result = await db.execute(
+            select(PostureHistory)
+            .where(PostureHistory.device_id == active_device.id)
+            .limit(1)
+        )
+        has_posture_history = result.scalar_one_or_none() is not None
+    
+    # No posture history = high risk
+    if not has_posture_history:
+        # Log access denial
+        await AccessService.log_access(
+            db=db,
+            device_id=active_device.id,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="No DPA posture history found. Device has not submitted any posture reports.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="No DPA posture history found. Device has not submitted any posture reports.",
+            has_dpa=False,
+            tpm_key_match=False,
+            is_compliant=active_device.is_compliant,
+            device_id=active_device.id,
+            device_name=active_device.device_name,
+            risk_level="high",
+            requires_step_up=True
+        )
     
     # Invalid TPM key = critical risk
-    if not tpm_key_match:
+    if active_device.tpm_public_key and not tpm_key_match:
+        # Log access denial
+        await AccessService.log_access(
+            db=db,
+            device_id=active_device.id,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="TPM key verification failed. Device may have been compromised.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
         return PolicyDecisionResponse(
             allowed=False,
             reason="TPM key verification failed. Device may have been compromised.",
@@ -489,21 +612,53 @@ async def policy_decision(
             requires_step_up=True
         )
     
-    # Check DPA activity
+    # Check DPA activity (recent posture report)
     has_dpa = False
     if active_device.last_posture_check:
         time_since_posture = datetime.now(timezone.utc) - active_device.last_posture_check.replace(tzinfo=timezone.utc)
         has_dpa = time_since_posture < timedelta(minutes=15)
     
-    # Stale posture = medium risk
+    # No recent DPA posture report = deny access
     if not has_dpa:
-        risk_level = "medium"
+        risk_level = "high"
         requires_step_up = True
+        # Log access denial for missing recent posture report
+        await AccessService.log_access(
+            db=db,
+            device_id=active_device.id,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="No recent DPA posture report found. Device must submit a posture report within the last 15 minutes.",
+            request_metadata={"last_posture_check": active_device.last_posture_check.isoformat() if active_device.last_posture_check else None},
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
+        return PolicyDecisionResponse(
+            allowed=False,
+            reason="No recent DPA posture report found. Device must submit a posture report within the last 15 minutes.",
+            has_dpa=False,
+            tpm_key_match=tpm_key_match,
+            is_compliant=active_device.is_compliant,
+            device_id=active_device.id,
+            device_name=active_device.device_name,
+            risk_level=risk_level,
+            requires_step_up=requires_step_up
+        )
     
     # Non-compliant device = high risk
     if not active_device.is_compliant:
         risk_level = "high"
         requires_step_up = True
+        # Log access denial
+        await AccessService.log_access(
+            db=db,
+            device_id=active_device.id,
+            resource_accessed=request_data.resource,
+            access_type="policy_decision",
+            access_granted=False,
+            denial_reason="Device is not compliant. Please ensure your device meets security requirements.",
+            source_ip=http_request.client.host if http_request and http_request.client else None
+        )
         return PolicyDecisionResponse(
             allowed=False,
             reason="Device is not compliant. Please ensure your device meets security requirements.",

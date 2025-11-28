@@ -14,13 +14,14 @@ class AccessLogBase(BaseModel):
     request_metadata: Optional[Dict[str, Any]] = None
 
 class AccessLogCreate(AccessLogBase):
-    device_id: int
+    device_id: Optional[int] = None
     source_ip: Optional[str] = Field(None, max_length=45)
     destination_ip: Optional[str] = Field(None, max_length=45)
 
 class AccessLogResponse(AccessLogBase):
     id: int
-    device_id: int
+    device_id: Optional[int]
+    device_name: Optional[str] = None
     source_ip: Optional[str]
     destination_ip: Optional[str]
     accessed_at: datetime

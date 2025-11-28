@@ -8,7 +8,7 @@ class AccessLog(Base):
     __tablename__ = "access_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=True, index=True)
     
     # Access details
     resource_accessed = Column(String(500), nullable=False)

@@ -105,3 +105,4 @@ POST /api/session/enforce-single HTTP/1.1" 200
    - Keycloak should include `sid` in JWT
    - If missing, all sessions will be logged out (user must re-login)
 
+

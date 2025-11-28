@@ -42,3 +42,4 @@ for route in api_routes[:10]:
     methods = list(route.methods) if hasattr(route, 'methods') else []
     print(f"  - {route.path} {methods}")
 
+
