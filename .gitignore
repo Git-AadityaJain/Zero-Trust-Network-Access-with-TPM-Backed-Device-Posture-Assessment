@@ -66,3 +66,9 @@ keycloak_data/
 # Temporary
 *.tmp
 *.temp
+
+#Envrionment Variables
+.env
+.env.local
+.env.*.local
+*.env
