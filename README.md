@@ -143,6 +143,30 @@ cd infra && docker-compose exec backend alembic upgrade head
 - Username: `admin`
 - Password: `adminsecure123`
 
+### 7. Generate Enrollment code
+- Login as admin to the webpage
+- Navigate to Enrollment Code Page
+- Generate new Enrollment code
+
+### 8. Add DPA device
+```bash
+ python -m dpa.cli.enroll_cli --backend-url <BACKEND URL> --enrollment-code <ENROLLMENT CODE>
+```
+- Post Adding device approve device from the Pending-Device Page
+- Create new User
+- To give user admin role:
+  - Navigate to Keycloak Admin Panel
+  - Go to Users page
+  - Add Role Mapping Manually
+
+### 9. Start Posture Scheduler
+```bash
+python -m dpa.start_posture_scheduler
+```
+
+### 10. Access Resource Page
+- After a Successfull Posture report is submitted
+- Gain Access to the Rescource Page
 **⚠️ Note**: Change these credentials in production!
 
 ## 📁 Project Structure
@@ -335,3 +359,4 @@ For issues and questions, please open an issue in the repository.
 ---
 
 **Built with ❤️ for Zero Trust Network Access**
+
