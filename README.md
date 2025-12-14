@@ -348,9 +348,7 @@ Common issues:
 3. Run tests and linting
 4. Submit a pull request
 
-## 📄 License
 
-[Specify your license here]
 
 ## 🆘 Support
 
@@ -359,4 +357,5 @@ For issues and questions, please open an issue in the repository.
 ---
 
 **Built with ❤️ for Zero Trust Network Access**
+
 
